@@ -25,11 +25,35 @@ class BpqInterface():
     # TODO handle disconnect, and we need a Queue to SEND commands over telnet too
     async def telnet_passthru(self):
         self.telnet_reader, self.telnet_writer = await asyncio.open_connection('127.0.0.1', 8010)
+        print("about to login")
+
+        await asyncio.sleep(2) ### TODO THIS IS A HACK!
+
+        r = await self.telnet_reader.read(1000)
+        print(f"recvd: {r}")
+
+        await asyncio.sleep(2) ### TODO THIS IS A HACK!
+
+        self.telnet_writer.write("2E0HKD\r\n".encode('utf-8'))
+        print("callsign sent")
+        
+        await asyncio.sleep(2) ### TODO THIS IS A HACK!
+
+        r = await self.telnet_reader.read(1000)
+        print(f"recvd: {r}")
+
+        await asyncio.sleep(2) ### TODO THIS IS A HACK!
+        
+        self.telnet_writer.write("R@dio\r\n".encode('utf-8'))
+        print("pass sent")
+        
+        await asyncio.sleep(2) ### TODO THIS IS A HACK!
+
         while True:
             msg_bytes = await self.telnet_reader.readline()
             msg_str = msg_bytes.decode("utf-8")
-            print(f"telnet received: {msg_str}")
-            await self.bot_out_queue.put(msg_str)
+            print(f"telnet received: {msg_str}")  ## TODO we get blank lines sometimes, these cannot be sent over discord! pre-pending "telnet: " fixes it for now, but we need to do better..
+            await self.bot_out_queue.put("telnet: " + msg_str)
 
 
 async def main():
