@@ -7,7 +7,7 @@ name = "packetnodebot"
 version = "0.0.1"
 description = "Interact with a ham radio packet node via an online chat service"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Programming Language :: Python :: 3",
