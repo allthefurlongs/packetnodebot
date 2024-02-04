@@ -15,7 +15,14 @@ classifiers = [
     "Topic :: Communications :: Ham Radio",
     "Framework :: AsyncIO"
 ]
+dependencies = [
+  "pyyaml",
+  "discord.py==2.3.2"
+]
 
 [project.urls]
 Homepage = "https://github.com/allthefurlongs/packetnodebot"
 Issues = "https://github.com/allthefurlongs/packetnodebot/issues"
+
+[project.scripts]
+bpqnodebot = "packetnodebot.bpq:bpqnodebot"
