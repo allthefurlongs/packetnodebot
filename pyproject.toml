@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "packetnodebot"
+version = "0.0.1"
+description = "Interact with a ham radio packet node via an online chat service"
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Communications :: Ham Radio",
+    "Framework :: AsyncIO"
+]
+
+[project.urls]
+Homepage = "https://github.com/allthefurlongs/packetnodebot"
+Issues = "https://github.com/allthefurlongs/packetnodebot/issues"
