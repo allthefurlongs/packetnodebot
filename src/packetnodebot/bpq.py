@@ -22,35 +22,63 @@ class BpqInterface():
         except Exception as e:
             print(e)
 
+
+    ### NOTE:
+    ### telnet server implements telnet control protocol, FBB port does not.
+    ### would be nice to support both?
+    ### FBB does not send prompts for user and pass, so no need to read back before sending them... and it seems to send BPQTERMTCP afterwards to go into whatever mode that uses
+    ###
+    ### SO: when we config whether to use telnet or FBB, react differently accordingly - may do FBB first, because we'll use that anyway for monitoring, and no need to do telnet control protocol!
+    ###
+    ### There is an asyncio telnet client, but it is not necessarily well maintained and may have bugs, so I'd like to just handle it directly on an MVP basis
+
+
     # TODO handle disconnect, and we need a Queue to SEND commands over telnet too
     async def telnet_passthru(self):
         self.telnet_reader, self.telnet_writer = await asyncio.open_connection('127.0.0.1', 8010)
         print("about to login")
 
-        await asyncio.sleep(2) ### TODO THIS IS A HACK!
+        # Wait for user prompt
+        try:
+            await asyncio.wait_for(self.telnet_reader.readuntil(b':'), timeout=5)
+        except TimeoutError:
+            print("The long operation timed out, but we've handled it.")  ## TODO probably bail, allow reconnect later or whatever - maybe send error to bot?
+        except (asyncio.LimitOverrunError, asyncio.IncompleteReadError) as e:
+            print(f"asyncio error waiting for user prompt: {e}")  ## TODO probably bail, allow reconnect later or whatever - maybe send error to bot?
 
-        r = await self.telnet_reader.read(1000)
-        print(f"recvd: {r}")
-
-        await asyncio.sleep(2) ### TODO THIS IS A HACK!
-
-        self.telnet_writer.write("2E0HKD\r\n".encode('utf-8'))
+        self.telnet_writer.write("2E0HKD\r".encode('utf-8'))
+        await self.telnet_writer.drain()
         print("callsign sent")
-        
-        await asyncio.sleep(2) ### TODO THIS IS A HACK!
 
-        r = await self.telnet_reader.read(1000)
-        print(f"recvd: {r}")
+         # Wait for pass prompt
+        try:
+            await asyncio.wait_for(self.telnet_reader.readuntil(b':'), timeout=5)
+        except TimeoutError:
+            print("The long operation timed out, but we've handled it.")  ## TODO probably bail, allow reconnect later or whatever - maybe send error to bot?
+        except (asyncio.LimitOverrunError, asyncio.IncompleteReadError) as e:
+            print(f"asyncio error waiting for user prompt: {e}")  ## TODO probably bail, allow reconnect later or whatever - maybe send error to bot?
 
-        await asyncio.sleep(2) ### TODO THIS IS A HACK!
-        
-        self.telnet_writer.write("R@dio\r\n".encode('utf-8'))
+        self.telnet_writer.write("R@dio\r".encode('utf-8'))
+        await self.telnet_writer.drain()
         print("pass sent")
         
-        await asyncio.sleep(2) ### TODO THIS IS A HACK!
+        #self.telnet_writer.write("BPQTERMTCP\r".encode('utf-8'))
+        #await self.telnet_writer.drain()
+        #print("BPQTERMTCP sent")
+
+        #self.telnet_writer.write("\\\\100000003 1 1 1 1 0 0 1\r".encode('utf-8'))
+        #await self.telnet_writer.drain()
+        #print("\\\\100000003 1 1 1 1 0 0 1 sent")
+
+        #self.telnet_writer.write("?\r".encode('utf-8'))
+        #await self.telnet_writer.drain()
+        #print("? sent")
 
         while True:
-            msg_bytes = await self.telnet_reader.readline()
+            msg_bytes = await self.telnet_reader.readline()   ### TODO try to make this a coroutine that then yields here instead?
+            if not msg_bytes:
+                print("telnet connection lost")  ##### atually does this just mean "no more to read for now"?
+                break
             msg_str = msg_bytes.decode("utf-8")
             print(f"telnet received: {msg_str}")  ## TODO we get blank lines sometimes, these cannot be sent over discord! pre-pending "telnet: " fixes it for now, but we need to do better..
             await self.bot_out_queue.put("telnet: " + msg_str)
