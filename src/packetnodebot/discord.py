@@ -1,5 +1,7 @@
 import discord
 
+### TODO maybe make this a separate pip package entirely, so you can: pip install packetnodebot-discord
+### That way we do not need to force all the deps for every bot connector to be installed, just the ones you want to use
 
 class DiscordConnector(discord.Client):
     def __init__(self, *args, bot_in_queue, bot_out_queue, **kwargs,):
