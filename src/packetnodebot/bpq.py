@@ -67,7 +67,7 @@ class BpqInterface():
     async def fbb_start_monitor(self):
         await self.ensure_fbb_connected()
         self.fbb_state['monitoring'] = True
-        self.fbb_writer.write(b"\\\\\\\\3 1 1 1 1 0 0 1\r")  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
+        self.fbb_writer.write(b"\\\\\\\\7 1 1 1 1 0 0 1\r")  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
         await self.fbb_writer.drain()
 
 
@@ -102,6 +102,7 @@ class BpqInterface():
                 self.fbb_writer.close()
                 self.fbb_writer = None
             print("FBB connection terminated")
+            ### TODO re-raise here, so fbb_start_monitor() knows not to set monitorring == True??
 
 
     async def fbb_connection(self):
@@ -112,34 +113,49 @@ class BpqInterface():
 
         try:
             while True:
-                ### TODO QUESTION: do we want to use async_read() here which was designed to give telnet passthru as much data in one go as possible
-                ### or, do we want to have more of a asyncio.readuntil() approach if EVERYthing we expect after connecting will end with a newline?
-                ### ... and actually readline() will do right? we care less about timeout here - IF we expect a newline, we can wait for a newline....
-                ###      if we change what we monitor we'll get a new port map ending in '|', but we can handle that separately... hell we can just reconnect worst case...
-                ###
-                ### TODO TODO THE BELOW IN FACT!
-                ### OH NO!!! It does NOT all end in a newline... monitor output ends in \xfe -- ok so how about this: MODIFY async_read() to accept an ARRAY of separators.
-                ### OR BETTER: do make a new method, DO NOT try to get as much data all in one message as possible (thats for bot passthru's!), and instead:
-                ###    Have an array of separators
-                ###    When we get a message ending in one of them SPLIT UP what we have into however many messages we have
-                ###    Try to yield each message individually
-                ###        THIS MEANS: no shared buffer, just some internal buffer and we keep track of what we ave and split it into messages based on all the separators and yirld them one by one.... YEAH!
-                ###
-                ### If it does, then yes, it will simplify things.
-                ### I think everything except port list if we were to change what we monitor will be like this.. but will need to experiment
-                message = await self.async_read(self.fbb_reader, decode=False)
-                #message = await self.fbb_reader.readline()
-                if message == b'Connected to TelnetServer\r':
-                    print("FBB Connected-to-telnet received")  # pass
-                if message.startswith(b'\xff\x1b\x11'):  ## WILL ACTUALLY end with \xfe when we get message chopping done as in above comment
-                    print(f"FBB MONITOR Portmap received: {message}")
-                elif message.startswith(b'\xff\xff'):  ## WILL ACTUALLY end with b'|' when we get message chopping done
-                    print(f"FBB MONITOR received: {message}")
+                byte = await self.fbb_reader.read(1)
+                if len(byte) == 0:
+                    next
+                elif byte[0] == 0xff:
+                    # Monitor output, see if it is a portmap or an actual monitored packet
+                    byte = await self.fbb_reader.read(1)
+                    while(len(byte) == 0):
+                        byte = await self.fbb_reader.read(1)
+                    if byte[0] == 0xff:
+                        message = await self.fbb_reader.readuntil(b'|')
+                        message = message[:-1]  # Remove the trailing '|'
+                        try:
+                            port_count = int(message)
+                            ports = []
+                            for i in range(0, port_count):
+                                message = await self.fbb_reader.readuntil(b'|')
+                                ports.append(message[:-1])
+                            print(f"FBB monitor portmap received: port count: {port_count}, ports: {ports}")
+                        except Exception as e:
+                            print("FBB error parsing portmap: {e}")
+                    elif byte[0] == 0x1b:
+                        byte = await self.fbb_reader.read(1)
+                        while(len(byte) == 0):
+                            byte = await self.fbb_reader.read(1)
+                        if byte[0] == 0x11:
+                            message = await self.fbb_reader.readuntil(b'\xfe')
+                            message = message[:-1]  # Remove the trailing \xfe
+                            print(f"FBB monitor received: {message}")
+
+                            if self.fbb_state['monitoring']:
+                                pass  ## TODO check for the list of callsigns we may be monitoring for, or whatever other type of alerts may need to be generated and send to the bot
+
+                        else:
+                            print(f"FBB unrecognised byte following a message starting with 0xff 0x1b, expected 0x11 for a monitor message, got: {byte}. A small amount of junk may now be recieved until the end of this unknown message.")
+                    else:
+                        print(f"FBB unrecognised byte following a message starting with 0xff, expected 0x1b or 0xff for a monitor message, got: {byte}. A small amount of junk may now be recieved until the end of this unknown message.")
                 else:
-                    ### TODO DEBUG CATCH ALL
-                    print(f"FBB received: {message}")
-                    if len(message.rstrip()) > 0:
-                        await self.bot_out_queue.put(message) ### TODO USUALLY WE WILL NOT SEND TO THE BOT, but using it for debugging
+                    # Non-monitor output
+                    message = await self.fbb_reader.readuntil(b'\r')
+                    message = byte + message[:-1]  # Add on the first byte received originally, and remove trailing \r
+                    print(f"FBB non-monitor received: {message}")  ## TODO interpret it based on other state and pass it where it may need to go
+                    if message == b'Connected to TelnetServer':
+                        pass
 
         except Exception as e:
             print(f"Error in fbb_connection(): {e}")
