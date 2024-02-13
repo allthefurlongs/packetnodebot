@@ -14,37 +14,73 @@ class BpqInterface():
 
         self.fbb_state = {
             'monitoring': False,
+            'alerts': {
+                'calls_seen': set(),
+                'calls_connected': set()
+            }
         }
         self.fbb_connection_task = None
         self.fbb_writer = None
         self.fbb_reader = None
 
+    async def add_alert_call_seen(self, callsign):
+        if not self.fbb_state['monitoring']:
+            await self.fbb_start_monitor()
+        callsign = callsign.upper()
+        self.fbb_state['alerts']['calls_seen'].add(callsign)
+        await self.bot_out_queue.put(f"Alert added for {callsign} seen on air")
+
+    async def add_alert_call_connected(self, callsign):
+        if not self.fbb_state['monitoring']:
+            await self.fbb_start_monitor()
+        callsign = callsign.upper()
+        self.fbb_state['alerts']['calls_connected'].add(callsign)
+        await self.bot_out_queue.put(f"Alert added for {callsign} connecting")
+
+    async def check_alerts(self, message):
+        ### TODO add better parsing of monitor output! parse callsign EXPLICITLY from the format etc, not just this basic "is in the string" thing
+        for alert_call in self.fbb_state['alerts']['calls_seen']:
+            if alert_call.encode('utf-8') in message:
+                await self.bot_out_queue.put(f"ALERT: {alert_call} seen on air")  ## TODO add port info maybe? (by saving parsed portmap or using port config alias or whatever?)
+        for alert_call in self.fbb_state['alerts']['calls_connected']:
+            pass  ## TODO need proper parsing to see if connect flag to own callsign seen
+
     async def process_bot_incoming(self):
         try:
-            while True:  ## TODO have some flag we set when we quit or whatever
+            while True:
                 message = await self.bot_in_queue.get()
                 message = message.rstrip()
                 print(f"BpqInterface received: {message}")
 
                 if self.telnet_in_queue is not None:
                     await self.handle_message_tenet_passthru(message)
+                elif message == '#help' or message == "help" or message == "?":
+                   await self.bot_out_queue.put("Commands:\n"
+                                                "#help - this help message\n"
+                                                "alert call seen - add an alert when a callsign is seen on any port set for monitoring.\n"
+                                                "alert call connected - add an alert when a callsign connects to the node")  ## TODO flesh this out more
                 elif message == 'telnet passthru':
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
-                elif message.startswith('alert call seen'):
-                    fields = message.split(' ')
-                    if len(fields) >= 4:
-                        callsign = fields[3]
-                        if not self.fbb_state['monitoring']:
-                            await self.fbb_start_monitor()
-
-                        # callsign ...
-
-
-                ## TODO HACK just to test some stuff
-                elif message == 'fbb':
-                    await self.ensure_fbb_connected()
-
+                elif message.startswith('alert'):
+                    usage_alert = "Usage: alert <call> [alert_specific_args]"
+                    if message.startswith('alert call'):
+                        alert_call_usage = "Usage: alert call <seen|connected> <callsign>"
+                        fields = message.split(' ')
+                        if len(fields) >= 4:
+                            callsign = fields[3]
+                            if message.startswith('alert call seen'):
+                                await self.add_alert_call_seen(callsign)
+                            elif message.startswith('alert call connected'):
+                                await self.add_alert_call_connected(callsign)
+                            else:
+                                await self.bot_out_queue.put(alert_call_usage)
+                        else:
+                            await self.bot_out_queue.put(alert_call_usage)
+                    else:
+                        await self.bot_out_queue.put(usage_alert)
+                else:
+                   await self.bot_out_queue.put("Unknown command: type #help for help")
 
                 self.bot_in_queue.task_done()
         except Exception as e:
@@ -56,20 +92,17 @@ class BpqInterface():
         else:
             await self.telnet_in_queue.put(message)
 
-
     async def keepalive_nulls(self, writer, interval_secs=540):
         while True:
             await asyncio.sleep(interval_secs)
             writer.write(b"\x00")
             await writer.drain()
 
-
     async def fbb_start_monitor(self):
         await self.ensure_fbb_connected()
         self.fbb_state['monitoring'] = True
         self.fbb_writer.write(b"\\\\\\\\7 1 1 1 1 0 0 1\r")  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
         await self.fbb_writer.drain()
-
 
     async def ensure_fbb_connected(self):
         try:
@@ -87,10 +120,6 @@ class BpqInterface():
                 self.fbb_writer.write(b"2E0HKD\rR@dio\rBPQTERMTCP\r")
                 await self.fbb_writer.drain()
 
-                ## We expect a message ending in a newline confirming connection to telnet
-                #message = await self.async_read(self.fbb_reader, decode=False)
-                #print(f"FBB received: {message}")
-
                 if self.fbb_connection_task is None:
                     self.fbb_connection_task = asyncio.create_task(self.fbb_connection())
 
@@ -103,14 +132,9 @@ class BpqInterface():
                 self.fbb_writer = None
             print("FBB connection terminated")
             ### TODO re-raise here, so fbb_start_monitor() knows not to set monitorring == True??
-
+            ### AND if self.fbb_state['monitoring'] == True then ATTEMPT RECONNECT! And drop a message to the user saying connection lost and that alerts will not happen until reconnect.. then message on successful reconnection
 
     async def fbb_connection(self):
-
-        ### TODO this will connect to FBB, handle login and receiving of the port map
-        ###
-        ### FBB also probably needs a protocol state machine of sorts to know when to finish reading - like the portmap ends with "|" not a newline.
-
         try:
             while True:
                 byte = await self.fbb_reader.read(1)
@@ -143,7 +167,7 @@ class BpqInterface():
                             print(f"FBB monitor received: {message}")
 
                             if self.fbb_state['monitoring']:
-                                pass  ## TODO check for the list of callsigns we may be monitoring for, or whatever other type of alerts may need to be generated and send to the bot
+                                await self.check_alerts(message)
 
                         else:
                             print(f"FBB unrecognised byte following a message starting with 0xff 0x1b, expected 0x11 for a monitor message, got: {byte}. A small amount of junk may now be recieved until the end of this unknown message.")
@@ -159,7 +183,6 @@ class BpqInterface():
 
         except Exception as e:
             print(f"Error in fbb_connection(): {e}")
-
 
     # This looks a lot like asyncio.readuntil() or asyncio.readline() but we implement it here so we can get a partial
     # read buffer even if no separator was seen after a certain timeout, see: async_read(). Additionally, it allows
@@ -187,7 +210,6 @@ class BpqInterface():
         if decode:
             message = message.decode('utf-8', 'ignore')
         return message
-
 
     # TODO handle remote-disconnect
     async def telnet_passthru(self, telnet_in_queue):
@@ -254,7 +276,7 @@ class BpqInterface():
 
     async def telnet_passthru_outgoing(self, telnet_writer):
         try:
-            while True:  ## TODO have some flag we set when we quit or whatever
+            while True:
                 message = await self.telnet_in_queue.get()
                 telnet_writer.write(f"{message}\r".encode('utf-8'))
                 await telnet_writer.drain()
