@@ -1,0 +1,19 @@
+node_callsigns: [N0CALL, N0CALL2]
+bpq:
+  monitor_ports: [1, 2]
+  telnet_host: 127.0.0.1
+  telnet_port: 8010
+  telnet_user: N0CALL
+  telnet_pass: p@ssword
+  fbb_host: 127.0.0.1
+  fbb_port: 8011
+bot_connector: discord
+discord:
+  token: abcd1234
+  # The discord user ID that the bot will accept input from. Please remember the bot has the telnet password, so any user
+  # authorised to use the bot will have these same privileges.
+  #sysop_user_id: 0000000000000000000
+  # Set a password which when provided to the bot will set and save a discord user ID in this config file under sysop_user_id.
+  # This can be an easier way to establish privileged comms with the bot without having to obtain your discord user id manually.
+  # Once a sysop_user_id is set it will take precedence over this. Use a complex password to avoid anyone guessing it.
+  #register_sysop_user_id_bot_password: 

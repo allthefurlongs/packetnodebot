@@ -6,12 +6,22 @@ import packetnodebot.discord
 
 
 class BpqInterface():
-    def __init__(self, bot_in_queue, bot_out_queue):
+    COMMANDS = ("Commands:\n"
+               "help - This help message.\n"
+               "telnet passthru - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+               "alert call seen - Add an alert when a callsign is seen on any port set for monitoring.\n"
+               "alert call connected - Add an alert when a callsign connects to the node.\n"
+               "remove alert - Remove any of the above alerts"
+               "terminate bot - Shut down the bot, you will no longer be able to interact with it until it is restarted.")
+
+    def __init__(self, conf, bot_in_queue, bot_out_queue):
+        self.conf = conf
         self.bot_in_queue = bot_in_queue
         self.bot_out_queue = bot_out_queue
         self.telnet_passthru_task = None
         self.telnet_in_queue = None  # Used for telnet passthru, set to an asyncio.Queue when in use
 
+        self.command_state = None
         self.fbb_state = {
             'monitoring': False,
             'alerts': {
@@ -22,6 +32,9 @@ class BpqInterface():
         self.fbb_connection_task = None
         self.fbb_writer = None
         self.fbb_reader = None
+
+
+    ### TODO persist alerts to the config file
 
     async def add_alert_call_seen(self, callsign):
         if not self.fbb_state['monitoring']:
@@ -36,6 +49,31 @@ class BpqInterface():
         callsign = callsign.upper()
         self.fbb_state['alerts']['calls_connected'].add(callsign)
         await self.bot_out_queue.put(f"Alert added for {callsign} connecting")
+
+    async def remove_alert_call_seen(self, callsign):
+        callsign = callsign.upper()
+        if callsign in self.fbb_state['alerts']['calls_seen']:
+            self.fbb_state['alerts']['calls_seen'].remove(callsign)
+            await self.bot_out_queue.put(f"Alert removed for {callsign} seen on air")
+        else:
+            await self.bot_out_queue.put(f"There was no alert for {callsign} seen on air")
+        await self.stop_fbb_monitor_if_not_required()
+
+    async def remove_alert_call_connected(self, callsign):
+        callsign = callsign.upper()
+        if callsign in self.fbb_state['alerts']['calls_connected']:
+            self.fbb_state['alerts']['calls_connected'].remove(callsign)
+            await self.bot_out_queue.put(f"Alert removed for {callsign} connecting")
+        else:
+            await self.bot_out_queue.put(f"There was no alert for {callsign} connecting")
+        await self.stop_fbb_monitor_if_not_required()
+
+    async def stop_fbb_monitor_if_not_required(self):
+        if len(self.fbb_state['alerts']['calls_connected']) == 0 and len(self.fbb_state['alerts']['calls_seen']) == 0:
+            self.fbb_writer.write(b"\\\\\\\\0 0 0 0 0 0 0 0\r")
+            await self.fbb_writer.drain()
+            self.fbb_state['monitoring'] = False
+            print("No more alerts so FBB monitoring stopped")
 
     async def check_alerts(self, message):
         ### TODO add better parsing of monitor output! parse callsign EXPLICITLY from the format etc, not just this basic "is in the string" thing
@@ -54,11 +92,15 @@ class BpqInterface():
 
                 if self.telnet_in_queue is not None:
                     await self.handle_message_tenet_passthru(message)
+                if self.command_state == 'terminate_bot_confirm':
+                    if message.lower() == 'yes':
+                        await self.bot_out_queue.put("Bot Terminating - bye!")
+                        exit()  # TODO we need a more graceful termination - maybe push a command to the bot queue to terminate as well
+                    else:
+                        self.command_state = None
+                        await self.bot_out_queue.put("Bot Terminate aborted")
                 elif message == '#help' or message == "help" or message == "?":
-                   await self.bot_out_queue.put("Commands:\n"
-                                                "#help - this help message\n"
-                                                "alert call seen - add an alert when a callsign is seen on any port set for monitoring.\n"
-                                                "alert call connected - add an alert when a callsign connects to the node")  ## TODO flesh this out more
+                   await self.bot_out_queue.put(BpqInterface.COMMANDS)
                 elif message == 'telnet passthru':
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
@@ -67,7 +109,7 @@ class BpqInterface():
                     if message.startswith('alert call'):
                         alert_call_usage = "Usage: alert call <seen|connected> <callsign>"
                         fields = message.split(' ')
-                        if len(fields) >= 4:
+                        if len(fields) == 4:
                             callsign = fields[3]
                             if message.startswith('alert call seen'):
                                 await self.add_alert_call_seen(callsign)
@@ -79,6 +121,27 @@ class BpqInterface():
                             await self.bot_out_queue.put(alert_call_usage)
                     else:
                         await self.bot_out_queue.put(usage_alert)
+                elif message.startswith('remove alert'):
+                    usage_alert = "Usage: remove alert <call> [alert_specific_args]"
+                    if message.startswith('remove alert call'):
+                        alert_call_usage = "Usage: remove alert call <seen|connected> <callsign>"
+                        fields = message.split(' ')
+                        if len(fields) == 5:
+                            callsign = fields[4]
+                            if message.startswith('remove alert call seen'):
+                                await self.remove_alert_call_seen(callsign)
+                            elif message.startswith('remove alert call connected'):
+                                await self.remove_alert_call_connected(callsign)
+                            else:
+                                await self.bot_out_queue.put(alert_call_usage)
+                        else:
+                            await self.bot_out_queue.put(alert_call_usage)
+                    else:
+                        await self.bot_out_queue.put(usage_alert)
+                elif message == 'terminate bot':
+                    await self.bot_out_queue.put("Terminate Bot - Are you sure? You will not be able to interact with "
+                                                 "the bot until you restart it on the node. Reply 'yes' to confirm.") 
+                    self.command_state = 'terminate_bot_confirm'
                 else:
                    await self.bot_out_queue.put("Unknown command: type #help for help")
 
@@ -131,6 +194,7 @@ class BpqInterface():
                 self.fbb_writer.close()
                 self.fbb_writer = None
             print("FBB connection terminated")
+            raise
             ### TODO re-raise here, so fbb_start_monitor() knows not to set monitorring == True??
             ### AND if self.fbb_state['monitoring'] == True then ATTEMPT RECONNECT! And drop a message to the user saying connection lost and that alerts will not happen until reconnect.. then message on successful reconnection
 
@@ -290,25 +354,35 @@ async def main():
     try:
         with open('packetnodebot.yaml', 'r') as file:
             conf = yaml.safe_load(file)
+        if 'bot_connector' not in conf:
+            exit('Missing bot_connector in config file')
+        if conf['bot_connector'] not in conf:
+            exit(f"Missing connector {conf['bot_connector']} in config file")
+        if 'bpq' not in conf:
+            exit('Missing bpq in config file')
 
         bot_in_queue = asyncio.Queue()
         bot_out_queue = asyncio.Queue()
+        bpq = BpqInterface(conf, bot_in_queue, bot_out_queue)
 
-        bpq = BpqInterface(bot_in_queue, bot_out_queue)
+        if conf['bot_connector'] == 'discord':
+            intents = discord.Intents.default()
+            intents.message_content = True
+            intents.members = True
+            bot_connector = packetnodebot.discord.DiscordConnector(conf=conf, conf_file='packetnodebot.yaml',
+                                                                   bot_in_queue=bot_in_queue,
+                                                                   bot_out_queue=bot_out_queue,
+                                                                   intents=intents)
+            connector_task = asyncio.create_task(bot_connector.start(conf['discord']['token']))
+        else:
+            exit('Unsupported bot_connector')
 
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
-        discord_con = packetnodebot.discord.DiscordConnector(bot_in_queue=bot_in_queue, bot_out_queue=bot_out_queue, intents=intents)
-
-        discord_task = asyncio.create_task(discord_con.start(conf['discord']['token']))
         bpq_process_bot_in_task = asyncio.create_task(bpq.process_bot_incoming())
-        discord_process_bot_out_task = asyncio.create_task(discord_con.process_bot_outgoing())
-
-        await asyncio.gather(discord_task, bpq_process_bot_in_task, discord_process_bot_out_task)#, fbb_connection_task)  ## TODO only addng FBB task here to test it
-
+        process_bot_out_task = asyncio.create_task(bot_connector.process_bot_outgoing())
+        await asyncio.gather(connector_task, bpq_process_bot_in_task, process_bot_out_task)
     except Exception as e:
         print(e)
+
 
 def bpqnodebot():
     try:
