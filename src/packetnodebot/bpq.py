@@ -1,23 +1,35 @@
+import signal
 import asyncio
 import yaml
 from io import BytesIO
 import discord
+import packetnodebot.common
 import packetnodebot.discord
 
 
 class BpqInterface():
+    COMMANDS_FIXED = ("Commands:\n"
+                      "help                 - This help message.\n"
+                      "fixed <on|off>       - Turn fixed-width font mode on/off.\n"
+                      "telnet passthru      - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                      "alert call seen      - Add an alert when a callsign is seen on any port set for monitoring.\n"
+                      "alert call connected - Add an alert when a callsign connects to the node.\n"
+                      "remove alert         - Remove any of the above alerts\n"
+                      "terminate bot        - Shut down the bot, you will no longer be able to interact with it until it is restarted.")
     COMMANDS = ("Commands:\n"
-               "help - This help message.\n"
-               "telnet passthru - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
-               "alert call seen - Add an alert when a callsign is seen on any port set for monitoring.\n"
-               "alert call connected - Add an alert when a callsign connects to the node.\n"
-               "remove alert - Remove any of the above alerts"
-               "terminate bot - Shut down the bot, you will no longer be able to interact with it until it is restarted.")
+                "help - This help message.\n"
+                "fixed <on|off> - Turn fixed-width font mode on/off.\n"
+                "telnet passthru - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                "alert call seen - Add an alert when a callsign is seen on any port set for monitoring.\n"
+                "alert call connected - Add an alert when a callsign connects to the node.\n"
+                "remove alert - Remove any of the above alerts\n"
+                "terminate bot - Shut down the bot, you will no longer be able to interact with it until it is restarted.")
 
-    def __init__(self, conf, bot_in_queue, bot_out_queue):
+    def __init__(self, conf, bot_in_queue, bot_out_queue, terminated):
         self.conf = conf
         self.bot_in_queue = bot_in_queue
         self.bot_out_queue = bot_out_queue
+        self.terminated = terminated
         self.telnet_passthru_task = None
         self.telnet_in_queue = None  # Used for telnet passthru, set to an asyncio.Queue when in use
 
@@ -32,6 +44,11 @@ class BpqInterface():
         self.fbb_connection_task = None
         self.fbb_writer = None
         self.fbb_reader = None
+
+        if 'fixed_width_font' in conf and conf['fixed_width_font']:
+            self.fixed_width = True
+        else:
+            self.fixed_width = False
 
 
     ### TODO persist alerts to the config file
@@ -84,23 +101,45 @@ class BpqInterface():
             pass  ## TODO need proper parsing to see if connect flag to own callsign seen
 
     async def process_bot_incoming(self):
-        try:
-            while True:
-                message = await self.bot_in_queue.get()
+        while not self.terminated.is_set():
+            message = await self.bot_in_queue.get()
+            try:
                 message = message.rstrip()
                 print(f"BpqInterface received: {message}")
 
                 if self.telnet_in_queue is not None:
                     await self.handle_message_tenet_passthru(message)
-                if self.command_state == 'terminate_bot_confirm':
+                elif self.command_state == 'terminate_bot_confirm':
                     if message.lower() == 'yes':
                         await self.bot_out_queue.put("Bot Terminating - bye!")
-                        exit()  # TODO we need a more graceful termination - maybe push a command to the bot queue to terminate as well
+                        
+                        
+                        #exit()  # TODO we need a more graceful termination - maybe push a command to the bot queue to terminate as well
+                        self.terminated.set()
+
+
                     else:
                         self.command_state = None
                         await self.bot_out_queue.put("Bot Terminate aborted")
                 elif message == '#help' or message == "help" or message == "?":
-                   await self.bot_out_queue.put(BpqInterface.COMMANDS)
+                   if self.fixed_width:
+                       await self.bot_out_queue.put(BpqInterface.COMMANDS_FIXED)
+                   else:
+                       await self.bot_out_queue.put(BpqInterface.COMMANDS)
+                elif message.startswith("fixed"):
+                    fixed_usage = "Usage: fixed <on|off>"
+                    fields = message.split(' ')
+                    if len(fields) == 2 and (fields[1] == "on" or fields[1] == "off"):
+                        if fields[1] == "on":
+                            self.fixed_width = True
+                            await self.bot_out_queue.put(packetnodebot.common.InternalBotCommand('fixed', 'on'))
+                            await self.bot_out_queue.put("Fixed-width font enabled")
+                        else:
+                            self.fixed_width = False
+                            await self.bot_out_queue.put(packetnodebot.common.InternalBotCommand('fixed', 'off'))
+                            await self.bot_out_queue.put("Fixed-width font disabled")
+                    else:
+                        await self.bot_out_queue.put(fixed_usage)
                 elif message == 'telnet passthru':
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
@@ -143,11 +182,11 @@ class BpqInterface():
                                                  "the bot until you restart it on the node. Reply 'yes' to confirm.") 
                     self.command_state = 'terminate_bot_confirm'
                 else:
-                   await self.bot_out_queue.put("Unknown command: type #help for help")
-
+                   await self.bot_out_queue.put("Unknown command: type help for help")
+            except Exception as e:
+                print(f"Error in process_bot_incoming(): {e}")
+            finally:
                 self.bot_in_queue.task_done()
-        except Exception as e:
-            print(e)
     
     async def handle_message_tenet_passthru(self, message):
         if message == '#quit':
@@ -156,10 +195,13 @@ class BpqInterface():
             await self.telnet_in_queue.put(message)
 
     async def keepalive_nulls(self, writer, interval_secs=540):
-        while True:
-            await asyncio.sleep(interval_secs)
-            writer.write(b"\x00")
-            await writer.drain()
+        while not self.terminated.is_set():
+            try:
+                await asyncio.sleep(interval_secs)
+                writer.write(b"\x00")
+                await writer.drain()
+            except Exception as e:
+                print(f"Error in keepalive_nulls(): {e}. Keepalive attempts will still continue to be sent.")
 
     async def fbb_start_monitor(self):
         await self.ensure_fbb_connected()
@@ -187,6 +229,10 @@ class BpqInterface():
                     self.fbb_connection_task = asyncio.create_task(self.fbb_connection())
 
         except Exception as e:
+
+            ### TODO this cleanup stuff probably also needs to happen in fbb_connection - but it wont have "keepalive", maybe pass it as an arg to the task (as seems overkill to make an instance var)
+            ### Then we can replicate this cleanup in a finally in fbb_connection (here it only needs to be in exception handler though)
+
             print(f"ERROR in ensure_fbb_connected(): {e}")
             if keepalive is not None:
                 keepalive.cancel()
@@ -200,10 +246,11 @@ class BpqInterface():
 
     async def fbb_connection(self):
         try:
-            while True:
+            while not self.terminated.is_set():
                 byte = await self.fbb_reader.read(1)
                 if len(byte) == 0:
-                    next
+                    await self.bot_out_queue.put("Lost FBB connection, alerts may not fire until connection is re-established")  ## TODO we'll want to auto-reconnect if there is monitoring active - keep retrying with delay until monitoring == False (eg. from user commands removing alerts)
+                    break  # EOF, ie. remove end disconnected
                 elif byte[0] == 0xff:
                     # Monitor output, see if it is a portmap or an actual monitored packet
                     byte = await self.fbb_reader.read(1)
@@ -277,6 +324,11 @@ class BpqInterface():
 
     # TODO handle remote-disconnect
     async def telnet_passthru(self, telnet_in_queue):
+        if ('telnet_host' not in self.conf['bpq'] or 'telnet_port' not in self.conf['bpq'] or
+           'telnet_user' not in self.conf['bpq'] or 'telnet_pass' not in self.conf['bpq']):
+            await self.bot_out_queue.put("Missing telnet config options under 'bpq;, expected: telnet_host, "
+                                         "telnet_port, telnet_user, telnet_pass")
+            return
         try:
             await self.bot_out_queue.put("Entering telnet passthru mode, all further messages will be sent directly to a logged in telnet session. To exit telnet passthru send: #quit")
 
@@ -316,11 +368,20 @@ class BpqInterface():
             self.telnet_in_queue = telnet_in_queue
             asyncio.create_task(self.telnet_passthru_outgoing(telnet_writer))
 
-            while True:
-                message = await self.async_read(telnet_reader)
-                if len(message.rstrip()) > 0:
-                    print(f"telnet received: {message}")
-                    await self.bot_out_queue.put(message)
+            while not self.terminated.is_set():
+                try:
+                    message = await self.async_read(telnet_reader)
+                    if len(message.rstrip()) > 0:
+                        print(f"telnet received: {message}")
+                        await self.bot_out_queue.put(message)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    print(f"Error in telnet_passthru() during async_read loop: {e}")
+                    try:
+                        await self.bot_out_queue.put(message)
+                    except:
+                        pass
         except asyncio.CancelledError:
             telnet_writer.write("b\r".encode('utf-8'))
             try:
@@ -339,18 +400,19 @@ class BpqInterface():
             self.telnet_in_queue = None  ## TODO also ideally do this if the remote end closes the telnet connection, and in that case also send a message via the bot to let the user know what happened
 
     async def telnet_passthru_outgoing(self, telnet_writer):
-        try:
-            while True:
+        while not self.terminated.is_set():
+            try:
                 message = await self.telnet_in_queue.get()
                 telnet_writer.write(f"{message}\r".encode('utf-8'))
                 await telnet_writer.drain()
                 print(f"Telnet sent: {message}")
+            except Exception as e:
+                print(f"Error in telnet_passthru_outgoing {e}")
+            finally:
                 self.telnet_in_queue.task_done()
-        except Exception as e:
-            print(e)
 
 
-async def main():
+async def main(terminated):
     try:
         with open('packetnodebot.yaml', 'r') as file:
             conf = yaml.safe_load(file)
@@ -363,16 +425,15 @@ async def main():
 
         bot_in_queue = asyncio.Queue()
         bot_out_queue = asyncio.Queue()
-        bpq = BpqInterface(conf, bot_in_queue, bot_out_queue)
+        bpq = BpqInterface(conf, bot_in_queue, bot_out_queue, terminated)
 
         if conf['bot_connector'] == 'discord':
             intents = discord.Intents.default()
             intents.message_content = True
             intents.members = True
             bot_connector = packetnodebot.discord.DiscordConnector(conf=conf, conf_file='packetnodebot.yaml',
-                                                                   bot_in_queue=bot_in_queue,
-                                                                   bot_out_queue=bot_out_queue,
-                                                                   intents=intents)
+                                                                   terminated=terminated, bot_in_queue=bot_in_queue,
+                                                                   bot_out_queue=bot_out_queue, intents=intents)
             connector_task = asyncio.create_task(bot_connector.start(conf['discord']['token']))
         else:
             exit('Unsupported bot_connector')
@@ -380,12 +441,18 @@ async def main():
         bpq_process_bot_in_task = asyncio.create_task(bpq.process_bot_incoming())
         process_bot_out_task = asyncio.create_task(bot_connector.process_bot_outgoing())
         await asyncio.gather(connector_task, bpq_process_bot_in_task, process_bot_out_task)
+
+        print("GATHERED TASKS ALL ENDED")
+
     except Exception as e:
-        print(e)
+        print(f"Error in main(): {e}")
 
 
 def bpqnodebot():
     try:
-        asyncio.run(main())
+        terminated = asyncio.Event()
+        asyncio.run(main(terminated))
+    except KeyboardInterrupt:
+        terminated.set()
     except Exception as e:
-        print(e)
+        print(f"Error in bpqnodebot(): {e}")

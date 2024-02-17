@@ -1,4 +1,5 @@
 node_callsigns: [N0CALL, N0CALL2]
+fixed_width_font: true
 bpq:
   monitor_ports: [1, 2]
   telnet_host: 127.0.0.1
