@@ -88,7 +88,8 @@ class BpqInterface():
         await self.stop_fbb_monitor_if_not_required()
 
     async def stop_fbb_monitor_if_not_required(self):
-        if len(self.fbb_state['alerts']['calls_connected']) == 0 and len(self.fbb_state['alerts']['calls_seen']) == 0:
+        if (len(self.fbb_state['alerts']['calls_connected']) == 0 and
+            len(self.fbb_state['alerts']['calls_seen']) == 0 and not self.fbb_state['bot_monitor']):
             self.fbb_writer.write(b"\\\\\\\\0 0 0 0 0 0 0 0\r")
             await self.fbb_writer.drain()
             self.fbb_state['monitoring'] = False
@@ -232,7 +233,7 @@ class BpqInterface():
         await self.ensure_fbb_connected()
         self.fbb_state['monitoring'] = True
         ### TODO do we only need X 1 1 (just those first 2 1's), thats monitor TX and monitor supervisory
-        self.fbb_writer.write(b"\\\\\\\\2 1 1 0 0 0 0 1\r")  ## b"\\\\\\\\7 1 1 1 1 0 0 1\r"  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
+        self.fbb_writer.write(b"\\\\\\\\2 1 1 1 0 0 0 1\r")  ## b"\\\\\\\\7 1 1 1 1 0 0 1\r"  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
         await self.fbb_writer.drain()
 
     async def ensure_fbb_connected(self):
