@@ -12,6 +12,7 @@ class BpqInterface():
                       "help                 - This help message.\n"
                       "fixed <on|off>       - Turn fixed-width font mode on/off.\n"
                       "telnet passthru      - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                      "monitor <on|off>     - Monitor all configured ports for any packets seen\n"
                       "alert call seen      - Add an alert when a callsign is seen on any port set for monitoring.\n"
                       "alert call connected - Add an alert when a callsign connects to the node.\n"
                       "remove alert         - Remove any of the above alerts\n"
@@ -20,6 +21,7 @@ class BpqInterface():
                 "help - This help message.\n"
                 "fixed <on|off> - Turn fixed-width font mode on/off.\n"
                 "telnet passthru - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                "monitor <on|off> - Monitor all configured ports for any packets seen\n"
                 "alert call seen - Add an alert when a callsign is seen on any port set for monitoring.\n"
                 "alert call connected - Add an alert when a callsign connects to the node.\n"
                 "remove alert - Remove any of the above alerts\n"
@@ -35,7 +37,8 @@ class BpqInterface():
 
         self.command_state = None
         self.fbb_state = {
-            'monitoring': False,
+            'monitoring': False,  # True if anything requiring FBB monitor data is enabled, so FBB connection is kept
+            'bot_monitor': False,
             'alerts': {
                 'calls_seen': set(),
                 'calls_connected': set()
@@ -93,6 +96,10 @@ class BpqInterface():
             print("No more alerts so FBB monitoring stopped")
 
     async def check_alerts(self, message):
+
+        ### TODO also probably need an ALERT DUPLICATE TIMER of some kind, so as to not SPAM people with alerts close together
+        ### maybe do not fire an alert again for 5 mins or something - configurable of course but have a sane default
+
         ### TODO add better parsing of monitor output! parse callsign EXPLICITLY from the format etc, not just this basic "is in the string" thing
         for alert_call in self.fbb_state['alerts']['calls_seen']:
             if alert_call.encode('utf-8') in message:
@@ -105,8 +112,6 @@ class BpqInterface():
             message = await self.bot_in_queue.get()
             try:
                 message = message.rstrip()
-                print(f"BpqInterface received: {message}")
-
                 if self.telnet_in_queue is not None:
                     await self.handle_message_tenet_passthru(message)
                 elif self.command_state == 'terminate_bot_confirm':
@@ -143,6 +148,27 @@ class BpqInterface():
                 elif message == 'telnet passthru':
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
+                elif message.startswith('monitor'):
+                    monitor_usage = "Usage: monitor <on|off>"
+                    fields = message.split(' ')
+                    if len(fields) == 2:
+                        if fields[1] == 'on':
+                            if not self.fbb_state['monitoring']:
+                                await self.fbb_start_monitor()
+                            self.fbb_state['bot_monitor'] = True
+                            await self.bot_out_queue.put("Monitor on")
+                        elif fields[1] == 'off':
+                            if not self.fbb_state['monitoring']:
+                                await self.fbb_start_monitor()
+                            self.fbb_state['bot_monitor'] = True
+                            await self.bot_out_queue.put("Monitor off")
+                        else:
+                            await self.bot_out_queue.put(monitor_usage)
+                    else:
+                        if self.fbb_state['bot_monitor']:
+                            await self.bot_out_queue.put(f"Monitor is on\n{monitor_usage}")
+                        else:
+                            await self.bot_out_queue.put(f"Monitor is off\n{monitor_usage}")
                 elif message.startswith('alert'):
                     usage_alert = "Usage: alert <call> [alert_specific_args]"
                     if message.startswith('alert call'):
@@ -206,10 +232,16 @@ class BpqInterface():
     async def fbb_start_monitor(self):
         await self.ensure_fbb_connected()
         self.fbb_state['monitoring'] = True
-        self.fbb_writer.write(b"\\\\\\\\7 1 1 1 1 0 0 1\r")  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
+        ### TODO do we only need X 1 1 (just those first 2 1's), thats monitor TX and monitor supervisory
+        self.fbb_writer.write(b"\\\\\\\\2 1 1 0 0 0 0 1\r")  ## b"\\\\\\\\7 1 1 1 1 0 0 1\r"  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
         await self.fbb_writer.drain()
 
     async def ensure_fbb_connected(self):
+        if ('fbb_host' not in self.conf['bpq'] or 'fbb_port' not in self.conf['bpq'] or
+           'fbb_user' not in self.conf['bpq'] or 'fbb_pass' not in self.conf['bpq']):
+            await self.bot_out_queue.put("Missing fbb config options under 'bpq;, expected: fbb_host, "
+                                         "fbb_port, fbb_user, fbb_pass")
+            raise Exception("FBB creds not configured")
         try:
             if self.fbb_writer is None:
                 keepalive = None
@@ -222,8 +254,25 @@ class BpqInterface():
 
                 keepalive = asyncio.create_task(self.keepalive_nulls(self.fbb_writer))
 
-                self.fbb_writer.write(b"2E0HKD\rR@dio\rBPQTERMTCP\r")
+                self.fbb_writer.write(f"{self.conf['bpq']['fbb_user']}\r{self.conf['bpq']['fbb_pass']}\r"
+                                      "BPQTERMTCP\r\\\\\\\\0 0 0 0 0 0 0 0\r".encode('utf-8'))
                 await self.fbb_writer.drain()
+
+                try:
+                    # We we sent a no-monitor setting above, we only expect a connected message ending in "\r" and not a
+                    # portmap ending in "|"
+                    
+                    #await asyncio.wait_for(self.fbb_reader.readuntil(b'\r'), timeout=5)
+
+                    message = await self.async_read(self.fbb_reader, timeout=5, decode=True, separator=b'\r')
+                    if message == 'password:':
+                        await self.bot_out_queue.put("Monitor could not be enabled because the FBB user/pass was not "
+                                                     "accepted")
+                        raise Exception("Bad FBB creds")
+                except asyncio.exceptions.TimeoutError:
+                    await self.bot_out_queue.put("Monitor could not be enabled due to no response from FBB, is the "
+                                                 "user/pass set correctly?")
+                    raise Exception("Bad FBB creds")
 
                 if self.fbb_connection_task is None:
                     self.fbb_connection_task = asyncio.create_task(self.fbb_connection())
@@ -258,6 +307,7 @@ class BpqInterface():
                         byte = await self.fbb_reader.read(1)
                     if byte[0] == 0xff:
                         message = await self.fbb_reader.readuntil(b'|')
+                        ### TODO we're only parsing the portmap here really as an example in case we want to use it later, otherwise we could just ignore it
                         message = message[:-1]  # Remove the trailing '|'
                         try:
                             port_count = int(message)
@@ -276,6 +326,11 @@ class BpqInterface():
                             message = await self.fbb_reader.readuntil(b'\xfe')
                             message = message[:-1]  # Remove the trailing \xfe
                             print(f"FBB monitor received: {message}")
+                            if self.fbb_state['bot_monitor']:
+                                # Output as a string representation of a bytes object, but remove the leading b' and
+                                # trailing '. This preserves the display of binary data in a safe form while not being
+                                # confusingly pythonesque as a string for the user.
+                                await self.bot_out_queue.put(f"Monitor: {str(message)[2:-1]}")
 
                             if self.fbb_state['monitoring']:
                                 await self.check_alerts(message)
@@ -333,7 +388,8 @@ class BpqInterface():
             await self.bot_out_queue.put("Entering telnet passthru mode, all further messages will be sent directly to a logged in telnet session. To exit telnet passthru send: #quit")
 
             try:
-                telnet_reader, telnet_writer = await asyncio.open_connection('127.0.0.1', 8010)
+                telnet_reader, telnet_writer = await asyncio.open_connection(self.conf['bpq']['telnet_host'],
+                                                                             self.conf['bpq']['telnet_port'])
             except ConnectionRefusedError:
                 await self.bot_out_queue.put("Could not connect to telnet - exiting telnet passthru mode")
                 return
@@ -348,7 +404,7 @@ class BpqInterface():
             except (asyncio.LimitOverrunError, asyncio.IncompleteReadError) as e:
                 print(f"asyncio error waiting for user prompt: {e}")  ## TODO probably bail, allow reconnect later or whatever - maybe send error to bot?
 
-            telnet_writer.write("2E0HKD\r".encode('utf-8'))
+            telnet_writer.write(f"{self.conf['bpq']['telnet_user']}\r".encode('utf-8'))
             await telnet_writer.drain()
 
             # Wait for pass prompt
@@ -359,8 +415,7 @@ class BpqInterface():
             except (asyncio.LimitOverrunError, asyncio.IncompleteReadError) as e:
                 print(f"asyncio error waiting for user prompt: {e}")  ## TODO probably bail, allow reconnect later or whatever - maybe send error to bot?
 
-            ### TODO add a timeout to writes as well? Maybe wrap into a method
-            telnet_writer.write("R@dio\r".encode('utf-8'))
+            telnet_writer.write(f"{self.conf['bpq']['telnet_pass']}\r".encode('utf-8'))
             await telnet_writer.drain()
 
             # Now we are connected and logged in, we can start accepting telnet input via the bot, setting

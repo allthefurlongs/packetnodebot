@@ -8,6 +8,8 @@ bpq:
   telnet_pass: p@ssword
   fbb_host: 127.0.0.1
   fbb_port: 8011
+  fbb_user: N0CALL
+  fbb_pass: p@ssword
 bot_connector: discord
 discord:
   token: abcd1234
