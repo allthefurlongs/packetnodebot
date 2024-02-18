@@ -1,4 +1,3 @@
-import signal
 import asyncio
 import yaml
 from io import BytesIO
@@ -326,15 +325,10 @@ class BpqInterface():
                             message = await self.fbb_reader.readuntil(b'\xfe')
                             message = message[:-1]  # Remove the trailing \xfe
                             print(f"FBB monitor received: {message}")
-                            if self.fbb_state['bot_monitor']:
-                                # Output as a string representation of a bytes object, but remove the leading b' and
-                                # trailing '. This preserves the display of binary data in a safe form while not being
-                                # confusingly pythonesque as a string for the user.
-                                await self.bot_out_queue.put(f"Monitor: {str(message)[2:-1]}")
-
+                            if self.fbb_state['bot_monitor']:  ## TODO should this go in check_alerts(), and if so should we rename the method to be more generic?
+                                await self.bot_out_queue.put(f"Monitor: {packetnodebot.common.bytes_str(message)}")
                             if self.fbb_state['monitoring']:
                                 await self.check_alerts(message)
-
                         else:
                             print(f"FBB unrecognised byte following a message starting with 0xff 0x1b, expected 0x11 for a monitor message, got: {byte}. A small amount of junk may now be recieved until the end of this unknown message.")
                     else:
