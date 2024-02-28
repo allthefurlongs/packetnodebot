@@ -1,3 +1,4 @@
+import traceback
 import asyncio
 import yaml
 from io import BytesIO
@@ -89,11 +90,12 @@ class BpqInterface():
 
     async def stop_fbb_monitor_if_not_required(self):
         if (len(self.fbb_state['alerts']['calls_connected']) == 0 and
-            len(self.fbb_state['alerts']['calls_seen']) == 0 and not self.fbb_state['bot_monitor']):
+            len(self.fbb_state['alerts']['calls_seen']) == 0 and not self.fbb_state['bot_monitor']):  ### TODO also check we are connected to FBB, if not, obviously do nothing
             self.fbb_writer.write(b"\\\\\\\\0 0 0 0 0 0 0 0\r")
             await self.fbb_writer.drain()
             self.fbb_state['monitoring'] = False
-            print("No more alerts so FBB monitoring stopped")
+            print("No more alerts/monitoring so FBB monitoring stopped")
+        ### TODO disconnect FBB if nothong else needs the connection?
 
     async def check_alerts(self, message):
 
@@ -160,8 +162,10 @@ class BpqInterface():
                             await self.bot_out_queue.put("Monitor on")
                         elif fields[1] == 'off':
                             if not self.fbb_state['monitoring']:
-                                await self.fbb_start_monitor()
-                            self.fbb_state['bot_monitor'] = True
+                                self.fbb_state['bot_monitor'] = False
+                                #if self.fbb_task is not None:
+                                #    self.fbb_task.cancel()
+                                await self.stop_fbb_monitor_if_not_required()
                             await self.bot_out_queue.put("Monitor off")
                         else:
                             await self.bot_out_queue.put(monitor_usage)
@@ -211,7 +215,8 @@ class BpqInterface():
                 else:
                    await self.bot_out_queue.put("Unknown command: type help for help")
             except Exception as e:
-                print(f"Error in process_bot_incoming(): {e}")
+                tb = traceback.format_exc()
+                print(f"Error in process_bot_incoming(): {tb}")
             finally:
                 self.bot_in_queue.task_done()
     
