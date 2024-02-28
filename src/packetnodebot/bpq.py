@@ -306,6 +306,12 @@ class BpqInterface():
                 if len(byte) == 0:
                     await self.bot_out_queue.put("Lost FBB connection, alerts may not fire until connection is re-established")  ## TODO we'll want to auto-reconnect if there is monitoring active - keep retrying with delay until monitoring == False (eg. from user commands removing alerts)
                     break  # EOF, ie. remove end disconnected
+
+                ### TODO @@@ ok so \xFF is the START delim for monitor data, and \xFE is the END delim.
+                ### anything inside is just monitor data, BUT, that can include ANSI colour codes, which start \x1B and then have a byte specifying colour. So we just need to strip those out as we cannot do colours yet
+                ### (And while \xFF is also ANSI "form-feed", that may be coincidental?)
+                ### Regex can strip all ansi colour code escapes, or, we can just assume the first two bytes are (or may be) colour codes and assume no change of colour within, which to be honest is porbably fair?
+
                 elif byte[0] == 0xff:
                     # Monitor output, see if it is a portmap or an actual monitored packet
                     byte = await self.fbb_reader.read(1)
