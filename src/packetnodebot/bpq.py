@@ -150,7 +150,7 @@ class BpqInterface():
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
                 elif message.startswith('monitor'):
-                    monitor_usage = "Usage: monitor <on|off>"
+                    monitor_usage = "Usage: monitor <on|off>"   ### TODO expand this command to allow specifying ports to monitor, and type of monitoring on/off (TX, NODES, etc.)
                     fields = message.split(' ')
                     if len(fields) == 2:
                         if fields[1] == 'on':
@@ -323,7 +323,7 @@ class BpqInterface():
                         byte = await self.fbb_reader.read(1)
                         while(len(byte) == 0):
                             byte = await self.fbb_reader.read(1)
-                        if byte[0] == 0x11 or byte[0] == 0x5b:  ### TODO these are terminal colour codes, so need more full support eventually, but for now using the ones we know are in use
+                        if byte[0] == 0x11 or byte[0] == 0x5b:  ### TODO these are terminal colour codes, so need more full support eventually, but for now using the ones we know are in use - bonus points for adding the colours to the bot message, but that may be hard to do multi-bot-platform
                             message = await self.fbb_reader.readuntil(b'\xfe')
                             message = message[:-1]  # Remove the trailing \xfe
                             print(f"FBB monitor received: {message}")
