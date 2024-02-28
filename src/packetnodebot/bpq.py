@@ -110,6 +110,7 @@ class BpqInterface():
     async def process_bot_incoming(self):
         while not self.terminated.is_set():
             message = await self.bot_in_queue.get()
+            message = message.lower()
             try:
                 message = message.rstrip()
                 if self.telnet_in_queue is not None:
@@ -233,7 +234,7 @@ class BpqInterface():
         await self.ensure_fbb_connected()
         self.fbb_state['monitoring'] = True
         ### TODO do we only need X 1 1 (just those first 2 1's), thats monitor TX and monitor supervisory
-        self.fbb_writer.write(b"\\\\\\\\2 1 1 1 0 0 0 1\r")  ## b"\\\\\\\\7 1 1 1 1 0 0 1\r"  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
+        self.fbb_writer.write(b"\\\\\\\\7 1 1 1 0 0 0 1\r")  ## b"\\\\\\\\7 1 1 1 1 0 0 1\r"  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
         await self.fbb_writer.drain()
 
     async def ensure_fbb_connected(self):
@@ -322,7 +323,7 @@ class BpqInterface():
                         byte = await self.fbb_reader.read(1)
                         while(len(byte) == 0):
                             byte = await self.fbb_reader.read(1)
-                        if byte[0] == 0x11:
+                        if byte[0] == 0x11 or byte[0] == 0x5b:  ### TODO these are terminal colour codes, so need more full support eventually, but for now using the ones we know are in use
                             message = await self.fbb_reader.readuntil(b'\xfe')
                             message = message[:-1]  # Remove the trailing \xfe
                             print(f"FBB monitor received: {message}")
@@ -390,6 +391,11 @@ class BpqInterface():
                 return
 
             keepalive = asyncio.create_task(self.keepalive_nulls(telnet_writer))
+
+            ### TODO @@@ user and password prompt can actually be customised in the telnet port config like:
+            ### LOGINPROMPT=user:
+            ### PASSWORDPROMPT=password:
+            ### So we should have an OPTIONAL config for this as well in case someone did something exotic
 
             # Wait for user prompt
             try:
