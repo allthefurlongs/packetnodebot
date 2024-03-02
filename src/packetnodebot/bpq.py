@@ -148,7 +148,7 @@ class BpqInterface():
                             await self.bot_out_queue.put("Fixed-width font disabled")
                     else:
                         await self.bot_out_queue.put(fixed_usage)
-                elif message == 'telnet passthru':
+                elif message == 'telnet passthru':   ### TODO maybe add an option to use an alternative telnet user than the default configured
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
                 elif message.startswith('monitor'):
@@ -161,11 +161,10 @@ class BpqInterface():
                             self.fbb_state['bot_monitor'] = True
                             await self.bot_out_queue.put("Monitor on")
                         elif fields[1] == 'off':
-                            if not self.fbb_state['monitoring']:
-                                self.fbb_state['bot_monitor'] = False
-                                #if self.fbb_task is not None:
-                                #    self.fbb_task.cancel()
-                                await self.stop_fbb_monitor_if_not_required()
+                            self.fbb_state['bot_monitor'] = False
+                            #if self.fbb_task is not None:
+                            #    self.fbb_task.cancel()
+                            await self.stop_fbb_monitor_if_not_required()
                             await self.bot_out_queue.put("Monitor off")
                         else:
                             await self.bot_out_queue.put(monitor_usage)
