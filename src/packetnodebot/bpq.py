@@ -372,7 +372,7 @@ class BpqInterface():
     # Reads until a newline, or there is a timeout, in which case return whatever was already read into the buffer.
     # This means we will not garble most messages that do end in a newline, but if there is one that does not (like a
     # prompt) it will still get sent back to the user.
-    async def async_read(self, reader, timeout=5, decode=True, separator=b'\n'):
+    async def async_read(self, reader, timeout=10, decode=True, separator=b'\n'):
         buffer = BytesIO()
         try:
             await asyncio.wait_for(self.asyncio_readuntil_or_partial(reader, buffer, separator=separator), timeout=timeout)
