@@ -336,7 +336,7 @@ class BpqInterface():
                         if byte[0] == 0x11 or byte[0] == 0x5b:  ### TODO these are terminal colour codes, so need more full support eventually, but for now using the ones we know are in use - bonus points for adding the colours to the bot message, but that may be hard to do multi-bot-platform
                             message = await self.fbb_reader.readuntil(b'\xfe')
                             message = message[:-1]  # Remove the trailing \xfe
-                            print(f"FBB monitor received: {message}")
+                            #print(f"FBB monitor received: {message}")
                             if self.fbb_state['bot_monitor']:  ## TODO should this go in check_alerts(), and if so should we rename the method to be more generic?
                                 await self.bot_out_queue.put(f"Monitor: {packetnodebot.common.bytes_str(message)}")
                             if self.fbb_state['monitoring']:
@@ -438,7 +438,7 @@ class BpqInterface():
                 try:
                     message = await self.async_read(telnet_reader)
                     if len(message.rstrip()) > 0:
-                        print(f"telnet received: {message}")
+                        #print(f"telnet received: {message}")
                         await self.bot_out_queue.put(message)
                 except asyncio.CancelledError:
                     raise
@@ -471,7 +471,7 @@ class BpqInterface():
                 message = await self.telnet_in_queue.get()
                 telnet_writer.write(f"{message}\r".encode('utf-8'))
                 await telnet_writer.drain()
-                print(f"Telnet sent: {message}")
+                #print(f"Telnet sent: {message}")
             except Exception as e:
                 print(f"Error in telnet_passthru_outgoing {e}")
             finally:
