@@ -179,6 +179,9 @@ class BpqInterface():
                                 if port not in self.monitor_ports:
                                     self.monitor_ports.append(port)
                                     self.set_monitor_ports(self.monitor_ports)
+                                    if self.fbb_state['monitoring']:  # If already monitoring, update the active ports
+                                        self.fbb_writer.write(f"\\\\\\\\{self.monitor_ports_bin} 1 1 1 0 0 0 1\r".encode('utf-8'))
+                                        await self.fbb_writer.drain()
                                 await self.bot_out_queue.put("Monitor set to use ports: "
                                                             f"{', '.join(str(port) for port in self.monitor_ports)}")
                             elif fields[1] == 'del':
@@ -186,6 +189,9 @@ class BpqInterface():
                                 if port in self.monitor_ports:
                                     self.monitor_ports.remove(port)
                                     self.set_monitor_ports(self.monitor_ports)
+                                    if self.fbb_state['monitoring']:  # If already monitoring, update the active ports
+                                        self.fbb_writer.write(f"\\\\\\\\{self.monitor_ports_bin} 1 1 1 0 0 0 1\r".encode('utf-8'))
+                                        await self.fbb_writer.drain()
                                 await self.bot_out_queue.put("Monitor set to use ports: "
                                                             f"{', '.join(str(port) for port in self.monitor_ports)}")
                             else:
