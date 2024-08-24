@@ -99,7 +99,7 @@ class BpqInterface():
             print(f"Failed to parse from/to in passes_monitor_filter() for message: {message}")
             return True  # Pass the message just in case
         from_field = from_to[0]
-        to_field = from_to[0]
+        to_field = from_to[1]
         from_calls = from_field.split(',')
         for from_call in from_calls:
             if from_call.upper() in self.mon_filter['from']:
