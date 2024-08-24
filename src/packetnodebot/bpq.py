@@ -7,6 +7,10 @@ import packetnodebot.common
 import packetnodebot.discord
 
 
+def portnum_bin(port_num):
+    return 0b1 << (int(port_num) - 1)
+
+
 class BpqInterface():
     COMMANDS_FIXED = ("Commands:\n"
                       "help                 - This help message.\n"
@@ -237,8 +241,11 @@ class BpqInterface():
     async def fbb_start_monitor(self):
         await self.ensure_fbb_connected()
         self.fbb_state['monitoring'] = True
-        ### TODO do we only need X 1 1 (just those first 2 1's), thats monitor TX and monitor supervisory
-        self.fbb_writer.write(b"\\\\\\\\7 1 1 1 0 0 0 1\r")  ## b"\\\\\\\\7 1 1 1 1 0 0 1\r"  ## TODO hardcoded portmap here enabling the first few ports, get from config or whatever later
+        monitor_ports = 0b0
+        if 'monitor_ports' in self.conf['bpq']:
+            for port in self.conf['bpq']['monitor_ports']:
+                monitor_ports |= portnum_bin(1)
+        self.fbb_writer.write(f"\\\\\\\\{monitor_ports} 1 1 0 0 0 0 1\r".encode('utf-8'))
         await self.fbb_writer.drain()
 
     async def ensure_fbb_connected(self):
