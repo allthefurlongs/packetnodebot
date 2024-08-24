@@ -169,7 +169,10 @@ class BpqInterface():
                 elif message.startswith('monitorports'):
                     monitorports_usage = "Usage: monitorports <add|del> <portnum>"
                     fields = message.split(' ')
-                    if len(fields) == 2:
+                    if len(fields) == 1:
+                        await self.bot_out_queue.put("Monitor set to use ports: "
+                                                     f"{', '.join(str(port) for port in self.monitor_ports)}")
+                    elif len(fields) == 3:
                         try:
                             if fields[1] == 'add':
                                 port = int(fields[2])
@@ -177,21 +180,20 @@ class BpqInterface():
                                     self.monitor_ports.append(port)
                                     self.set_monitor_ports(self.monitor_ports)
                                 await self.bot_out_queue.put("Monitor set to use ports: "
-                                                     f"{', '.join(str(port) for port in self.monitor_ports)}")
+                                                            f"{', '.join(str(port) for port in self.monitor_ports)}")
                             elif fields[1] == 'del':
                                 port = int(fields[2])
                                 if port in self.monitor_ports:
                                     self.monitor_ports.remove(port)
                                     self.set_monitor_ports(self.monitor_ports)
                                 await self.bot_out_queue.put("Monitor set to use ports: "
-                                                     f"{', '.join(str(port) for port in self.monitor_ports)}")
+                                                            f"{', '.join(str(port) for port in self.monitor_ports)}")
                             else:
                                 await self.bot_out_queue.put(monitorports_usage)
                         except (TypeError, ValueError):
                             await self.bot_out_queue.put(monitorports_usage)  # Probably a non-number port provided
                     else:
-                        await self.bot_out_queue.put("Monitor set to use ports: "
-                                                     f"{', '.join(str(port) for port in self.monitor_ports)}")
+                        await self.bot_out_queue.put(monitorports_usage)
                 elif message.startswith('monitor'):
                     monitor_usage = "Usage: monitor <on|off>"
                     fields = message.split(' ')
