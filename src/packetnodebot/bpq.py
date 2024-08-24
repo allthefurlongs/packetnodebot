@@ -242,10 +242,16 @@ class BpqInterface():
                 elif message.startswith('monfilter'):
                     monfilter_usage = "Usage: monfilter <add|del> <from|to> <call>"
                     fields = message.split(' ')
+                    if len(self.mon_filter['from']) > 0:
+                        from_filter = ', '.join(self.mon_filter['from'])
+                    else:
+                        from_filter = '(none)'
+                    if len(self.mon_filter['to']) > 0:
+                        to_filter = ', '.join(self.mon_filter['to'])
+                    else:
+                        to_filter = '(none)'
                     if len(fields) == 1:
-                        await self.bot_out_queue.put("Monitor filtering From calls: "
-                                                     f"{', '.join(self.mon_filter['from'])}, "
-                                                     f"To calls: {', '.join(self.mon_filter['to'])}")
+                        await self.bot_out_queue.put(f"Monitor filtering From calls: {from_filter}, To calls: {to_filter}")
                     elif len(fields) == 4 and (fields[1] == 'add' or fields[1] == 'del') and (fields[2] == 'from' or
                                                                                               fields[2] == 'to'):
                         if fields[1] == 'add':
@@ -254,9 +260,7 @@ class BpqInterface():
                         elif fields[1] == 'del':
                             if fields[3] in self.mon_filter[fields[2]]:
                                 self.mon_filter[fields[2]].remove(fields[3])
-                        await self.bot_out_queue.put("Monitor filtering From calls: "
-                                                     f"{', '.join(self.mon_filter['from'])}, "
-                                                     f"To calls: {', '.join(self.mon_filter['to'])}")
+                        await self.bot_out_queue.put(f"Monitor filtering From calls: {from_filter}, To calls: {to_filter}")
                     else:
                         await self.bot_out_queue.put(monfilter_usage)
                 elif message.startswith('monitor'):
