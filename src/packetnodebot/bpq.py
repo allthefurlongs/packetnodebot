@@ -261,12 +261,13 @@ class BpqInterface():
                                                      f"To calls: {self.fmt_monfilter_to()}")
                     elif len(fields) == 4 and (fields[1] == 'add' or fields[1] == 'del') and (fields[2] == 'from' or
                                                                                               fields[2] == 'to'):
+                        call = fields[3].upper()
                         if fields[1] == 'add':
-                            if fields[3] not in self.mon_filter[fields[2]]:
-                                self.mon_filter[fields[2]].append(fields[3].upper())
+                            if call not in self.mon_filter[fields[2]]:
+                                self.mon_filter[fields[2]].append(call)
                         elif fields[1] == 'del':
-                            if fields[3] in self.mon_filter[fields[2]]:
-                                self.mon_filter[fields[2]].remove(fields[3].upper())
+                            if call in self.mon_filter[fields[2]]:
+                                self.mon_filter[fields[2]].remove(call)
                         await self.bot_out_queue.put(f"Monitor filtering From calls: {self.fmt_monfilter_from()}, "
                                                      f"To calls: {self.fmt_monfilter_to()}")
                     else:
