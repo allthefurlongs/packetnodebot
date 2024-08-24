@@ -229,7 +229,8 @@ class BpqInterface():
                     fields = message.split(' ')
                     if len(fields) == 1:
                         await self.bot_out_queue.put("Monitor set to use ports: "
-                                                     f"{', '.join(str(port) for port in self.monitor_ports)}")
+                                                     f"{', '.join(str(port) for port in self.monitor_ports)}\n"
+                                                     f"{monports_usage}")
                     elif len(fields) == 3:
                         try:
                             if fields[1] == 'add':
@@ -263,7 +264,7 @@ class BpqInterface():
                     fields = message.split(' ')
                     if len(fields) == 1:
                         await self.bot_out_queue.put(f"Monitor filtering From calls: {self.fmt_monfilter_from()}, "
-                                                     f"To calls: {self.fmt_monfilter_to()}")
+                                                     f"To calls: {self.fmt_monfilter_to()}\n{monfilter_usage}")
                     elif len(fields) == 4 and (fields[1] == 'add' or fields[1] == 'del') and (fields[2] == 'from' or
                                                                                               fields[2] == 'to'):
                         call = fields[3].upper()
