@@ -2,6 +2,9 @@ node_callsigns: [N0CALL, N0CALL2]
 fixed_width_font: true
 bpq:
   monitor_ports: [1, 2]
+  mon_filter:
+    to: [N0CALL, N0CALL2]
+    from: []
   telnet_host: 127.0.0.1
   telnet_port: 8010
   telnet_user: N0CALL

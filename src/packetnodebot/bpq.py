@@ -13,21 +13,23 @@ def portnum_bin(port_num):
 
 class BpqInterface():
     COMMANDS_FIXED = ("Commands:\n"
-                      "help                             - This help message.\n"
-                      "fixed <on|off>                   - Turn fixed-width font mode on/off.\n"
-                      "telnet passthru                  - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
-                      "monitor <on|off>                 - Monitor all configured ports for any packets seen.\n"
-                      "monitorports <add|del> <portnum> - Add/delete a port number from monitoring.\n"
-                      "alert call seen                  - Add an alert when a callsign is seen on any port set for monitoring.\n"
-                      "alert call connected             - Add an alert when a callsign connects to the node.\n"
-                      "remove alert                     - Remove any of the above alerts\n"
-                      "terminate bot                    - Shut down the bot, you will no longer be able to interact with it until it is restarted.")
+                      "help                                 - This help message.\n"
+                      "fixed <on|off>                       - Turn fixed-width font mode on/off.\n"
+                      "telnet passthru                      - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                      "monitor <on|off>                     - Monitor all configured ports for any packets seen.\n"
+                      "monitorports <add|del> <portnum>     - Add/delete a port number from monitoring.\n"
+                      "monfilter <add|del> <from|to> <call> - Add/delete calls to exclude from monitoring.\n"
+                      "alert call seen                      - Add an alert when a callsign is seen on any port set for monitoring.\n"
+                      "alert call connected                 - Add an alert when a callsign connects to the node.\n"
+                      "remove alert                         - Remove any of the above alerts\n"
+                      "terminate bot                        - Shut down the bot, you will no longer be able to interact with it until it is restarted.")
     COMMANDS = ("Commands:\n"
                 "help - This help message.\n"
                 "fixed <on|off> - Turn fixed-width font mode on/off.\n"
                 "telnet passthru - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
                 "monitor <on|off> - Monitor all configured ports for any packets seen.\n"
                 "monitorports <add|del> <portnum> - Add/delete a port number from monitoring.\n"
+                "monfilter <add|del> <from|to> <call> - Add/delete calls to exclude from monitoring.\n"
                 "alert call seen - Add an alert when a callsign is seen on any port set for monitoring.\n"
                 "alert call connected - Add an alert when a callsign connects to the node.\n"
                 "remove alert - Remove any of the above alerts\n"
@@ -58,6 +60,15 @@ class BpqInterface():
         else:
             self.set_monitor_ports([])
 
+        if 'mon_filter' in self.conf['bpq']:
+            self.mon_filter = self.conf['bpq']['mon_filter']
+        else:
+            self.mon_filter = {}
+        if 'from' not in self.mon_filter:
+            self.mon_filter['from'] = []
+        if 'to' not in self.mon_filter:
+            self.mon_filter['to'] = []
+
         if 'fixed_width_font' in conf and conf['fixed_width_font']:
             self.fixed_width = True
         else:
@@ -68,6 +79,34 @@ class BpqInterface():
         self.monitor_ports_bin = 0b0
         for port in self.monitor_ports:
             self.monitor_ports_bin |= portnum_bin(port)
+
+    def passes_monitor_filter(self, message):
+        if len(self.mon_filter['from']) == 0 and len(self.mon_filter['to']) == 0:
+            return True
+        first_space = message.find(' ')
+        if first_space == -1:
+            print(f"Failed to parse from/to in passes_monitor_filter() for message: {message}")
+            return True  # Pass the message just in case
+        second_space = message.find(' ', first_space + 1)
+        if second_space == -1:
+            print(f"Failed to parse from/to in passes_monitor_filter() for message: {message}")
+            return True  # Pass the message just in case
+        from_to = message[first_space + 1:second_space]
+        from_to = from_to.split('>')
+        if len(from_to) < 2:
+            print(f"Failed to parse from/to in passes_monitor_filter() for message: {message}")
+            return True  # Pass the message just in case
+        from_field = from_to[0]
+        to_field = from_to[0]
+        from_calls = from_field.split(',')
+        for from_call in from_calls:
+            if from_call in self.mon_filter['from']:
+                return False
+        to_calls = to_field.split(',')
+        for to_call in to_calls:
+            if to_call in self.mon_filter['to']:
+                return False
+        return True
 
     ### TODO persist alerts to the config file
 
@@ -200,8 +239,26 @@ class BpqInterface():
                             await self.bot_out_queue.put(monitorports_usage)  # Probably a non-number port provided
                     else:
                         await self.bot_out_queue.put(monitorports_usage)
-                #elif message.startswith('monfilter'):
-                #    pass ## TODO add a list of strings that will filter callsigns in "from" or "to" for the monitor - ie. imagine filtering node neighbours, but still getting monitor for users
+                elif message.startswith('monfilter'):
+                    monfilter_usage = "Usage: monfilter <add|del> <from|to> <call>"
+                    fields = message.split(' ')
+                    if len(fields) == 1:
+                        await self.bot_out_queue.put("Monitor filtering From calls: "
+                                                     f"{', '.join(self.mon_filter['from'])}, "
+                                                     f"To calls: {', '.join(self.mon_filter['to'])}")
+                    elif len(fields) == 4 and (fields[1] == 'add' or fields[1] == 'del') and (fields[2] == 'from' or
+                                                                                              fields[2] == 'to'):
+                        if fields[1] == 'add':
+                            if fields[3] not in self.mon_filter[fields[2]]:
+                                self.mon_filter[fields[2]].append(fields[3])
+                        elif fields[1] == 'del':
+                            if fields[3] in self.mon_filter[fields[2]]:
+                                self.mon_filter[fields[2]].remove(fields[3])
+                        await self.bot_out_queue.put("Monitor filtering From calls: "
+                                                     f"{', '.join(self.mon_filter['from'])}, "
+                                                     f"To calls: {', '.join(self.mon_filter['to'])}")
+                    else:
+                        await self.bot_out_queue.put(monfilter_usage)
                 elif message.startswith('monitor'):
                     monitor_usage = "Usage: monitor <on|off>"
                     fields = message.split(' ')
@@ -386,9 +443,10 @@ class BpqInterface():
                         if byte[0] == 0x11 or byte[0] == 0x5b:  ### TODO these are terminal colour codes, so need more full support eventually, but for now using the ones we know are in use - bonus points for adding the colours to the bot message, but that may be hard to do multi-bot-platform
                             message = await self.fbb_reader.readuntil(b'\xfe')
                             message = message[:-1]  # Remove the trailing \xfe
-                            #print(f"FBB monitor received: {message}")
                             if self.fbb_state['bot_monitor']:  ## TODO should this go in check_alerts(), and if so should we rename the method to be more generic?
-                                await self.bot_out_queue.put(f"Monitor: {packetnodebot.common.bytes_str(message)}")
+                                message_str = packetnodebot.common.bytes_str(message)
+                                if self.passes_monitor_filter(message_str):
+                                    await self.bot_out_queue.put(f"Monitor: {message_str}")
                             if self.fbb_state['monitoring']:
                                 await self.check_alerts(message)
                         else:
