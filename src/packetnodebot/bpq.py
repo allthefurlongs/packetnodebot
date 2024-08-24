@@ -200,6 +200,8 @@ class BpqInterface():
                             await self.bot_out_queue.put(monitorports_usage)  # Probably a non-number port provided
                     else:
                         await self.bot_out_queue.put(monitorports_usage)
+                #elif message.startswith('monfilter'):
+                #    pass ## TODO add a list of strings that will filter callsigns in "from" or "to" for the monitor - ie. imagine filtering node neighbours, but still getting monitor for users
                 elif message.startswith('monitor'):
                     monitor_usage = "Usage: monitor <on|off>"
                     fields = message.split(' ')
