@@ -10,6 +10,7 @@ bpq:
   telnet_port: 8010
   telnet_user: N0CALL
   telnet_pass: p@ssword
+  telnet_custom_prompt_end: ":"
   fbb_host: 127.0.0.1
   fbb_port: 8011
   fbb_user: N0CALL

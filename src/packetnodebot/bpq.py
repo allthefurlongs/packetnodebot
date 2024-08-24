@@ -15,7 +15,7 @@ class BpqInterface():
     COMMANDS_FIXED = ("Commands:\n"
                       "help                                 - This help message.\n"
                       "fixed <on|off>                       - Turn fixed-width font mode on/off.\n"
-                      "telnet passthru                      - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                      "telnet                               - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
                       "monitor <on|off>                     - Monitor all configured ports for any packets seen.\n"
                       "monitorports <add|del> <portnum>     - Add/delete a port number from monitoring.\n"
                       "monfilter <add|del> <from|to> <call> - Add/delete calls to exclude from monitoring.\n"
@@ -26,7 +26,7 @@ class BpqInterface():
     COMMANDS = ("Commands:\n"
                 "help - This help message.\n"
                 "fixed <on|off> - Turn fixed-width font mode on/off.\n"
-                "telnet passthru - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                "telnet - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
                 "monitor <on|off> - Monitor all configured ports for any packets seen.\n"
                 "monitorports <add|del> <portnum> - Add/delete a port number from monitoring.\n"
                 "monfilter <add|del> <from|to> <call> - Add/delete calls to exclude from monitoring.\n"
@@ -79,6 +79,11 @@ class BpqInterface():
         if 'monitor_on_startup' in self.conf['bpq'] and self.conf['bpq']['monitor_on_startup']:
             asyncio.create_task(self.start_bot_monitor())
 
+        if 'telnet_custom_prompt_end' in self.conf['bpq']:
+            self.telnet_prompt_end = self.conf['bpq']['telnet_custom_prompt_end'].encode('utf-8')
+        else:
+            self.telnet_prompt_end = b':'
+
     async def start_bot_monitor(self):
         await self.fbb_start_monitor()
         self.fbb_state['bot_monitor'] = True
@@ -128,8 +133,6 @@ class BpqInterface():
             return ', '.join(self.mon_filter['to'])
         else:
             return '(none)'
-
-    ### TODO persist alerts to the config file
 
     async def add_alert_call_seen(self, callsign):
         if not self.fbb_state['monitoring']:
@@ -195,12 +198,7 @@ class BpqInterface():
                 elif self.command_state == 'terminate_bot_confirm':
                     if message.lower() == 'yes':
                         await self.bot_out_queue.put("Bot Terminating - bye!")
-                        
-                        
-                        #exit()  # TODO we need a more graceful termination - maybe push a command to the bot queue to terminate as well
                         self.terminated.set()
-
-
                     else:
                         self.command_state = None
                         await self.bot_out_queue.put("Bot Terminate aborted")
@@ -223,7 +221,7 @@ class BpqInterface():
                             await self.bot_out_queue.put("Fixed-width font disabled")
                     else:
                         await self.bot_out_queue.put(fixed_usage)
-                elif message == 'telnet passthru':   ### TODO maybe add an option to use an alternative telnet user than the default configured
+                elif message == 'telnet':   ### TODO maybe add an option to use an alternative telnet user than the default configured
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
                 elif message.startswith('monitorports'):
@@ -391,11 +389,8 @@ class BpqInterface():
                 await self.fbb_writer.drain()
 
                 try:
-                    # We we sent a no-monitor setting above, we only expect a connected message ending in "\r" and not a
+                    # We sent a no-monitor setting above, we only expect a connected message ending in "\r" and not a
                     # portmap ending in "|"
-                    
-                    #await asyncio.wait_for(self.fbb_reader.readuntil(b'\r'), timeout=5)
-
                     message = await self.async_read(self.fbb_reader, timeout=5, decode=True, separator=b'\r')
                     if message == 'password:':
                         await self.bot_out_queue.put("Monitor could not be enabled because the FBB user/pass was not "
@@ -432,12 +427,6 @@ class BpqInterface():
                 if len(byte) == 0:
                     await self.bot_out_queue.put("Lost FBB connection, alerts may not fire until connection is re-established")  ## TODO we'll want to auto-reconnect if there is monitoring active - keep retrying with delay until monitoring == False (eg. from user commands removing alerts)
                     break  # EOF, ie. remove end disconnected
-
-                ### TODO @@@ ok so \xFF is the START delim for monitor data, and \xFE is the END delim.
-                ### anything inside is just monitor data, BUT, that can include ANSI colour codes, which start \x1B and then have a byte specifying colour. So we just need to strip those out as we cannot do colours yet
-                ### (And while \xFF is also ANSI "form-feed", that may be coincidental?)
-                ### Regex can strip all ansi colour code escapes, or, we can just assume the first two bytes are (or may be) colour codes and assume no change of colour within, which to be honest is porbably fair?
-
                 elif byte[0] == 0xff:
                     # Monitor output, see if it is a portmap or an actual monitored packet
                     byte = await self.fbb_reader.read(1)
@@ -445,7 +434,6 @@ class BpqInterface():
                         byte = await self.fbb_reader.read(1)
                     if byte[0] == 0xff:
                         message = await self.fbb_reader.readuntil(b'|')
-                        ### TODO we're only parsing the portmap here really as an example in case we want to use it later, otherwise we could just ignore it
                         message = message[:-1]  # Remove the trailing '|'
                         try:
                             port_count = int(message)
@@ -460,7 +448,7 @@ class BpqInterface():
                         byte = await self.fbb_reader.read(1)
                         while(len(byte) == 0):
                             byte = await self.fbb_reader.read(1)
-                        if byte[0] == 0x11 or byte[0] == 0x5b:  ### TODO these are terminal colour codes, so need more full support eventually, but for now using the ones we know are in use - bonus points for adding the colours to the bot message, but that may be hard to do multi-bot-platform
+                        if byte[0] == 0x11 or byte[0] == 0x5b:  # These are terminal colour codes
                             message = await self.fbb_reader.readuntil(b'\xfe')
                             message = message[:-1]  # Remove the trailing \xfe
                             if self.fbb_state['bot_monitor']:  ## TODO should this go in check_alerts(), and if so should we rename the method to be more generic?
@@ -470,9 +458,13 @@ class BpqInterface():
                             if self.fbb_state['monitoring']:
                                 await self.check_alerts(message)
                         else:
-                            print(f"FBB unrecognised byte following a message starting with 0xff 0x1b, expected 0x11 for a monitor message, got: {byte}. A small amount of junk may now be recieved until the end of this unknown message.")
+                            print("FBB unrecognised byte following a message starting with 0xff 0x1b, expected 0x11 "
+                                  f"for a monitor message, got: {byte}. A small amount of junk may now be recieved "
+                                  "until the end of this unknown message.")
                     else:
-                        print(f"FBB unrecognised byte following a message starting with 0xff, expected 0x1b or 0xff for a monitor message, got: {byte}. A small amount of junk may now be recieved until the end of this unknown message.")
+                        print("FBB unrecognised byte following a message starting with 0xff, expected 0x1b or 0xff "
+                              f"for a monitor message, got: {byte}. A small amount of junk may now be recieved until "
+                              "the end of this unknown message.")
                 else:
                     # Non-monitor output
                     message = await self.fbb_reader.readuntil(b'\r')
@@ -519,7 +511,8 @@ class BpqInterface():
                                          "telnet_port, telnet_user, telnet_pass")
             return
         try:
-            await self.bot_out_queue.put("Entering telnet passthru mode, all further messages will be sent directly to a logged in telnet session. To exit telnet passthru send: #quit")
+            await self.bot_out_queue.put("Entering telnet passthru mode, all further messages will be sent directly to "
+                                         "a logged in telnet session. To exit telnet passthru send: #quit")
 
             try:
                 telnet_reader, telnet_writer = await asyncio.open_connection(self.conf['bpq']['telnet_host'],
@@ -530,14 +523,9 @@ class BpqInterface():
 
             keepalive = asyncio.create_task(self.keepalive_nulls(telnet_writer))
 
-            ### TODO @@@ user and password prompt can actually be customised in the telnet port config like:
-            ### LOGINPROMPT=user:
-            ### PASSWORDPROMPT=password:
-            ### So we should have an OPTIONAL config for this as well in case someone did something exotic
-
             # Wait for user prompt
             try:
-                await asyncio.wait_for(telnet_reader.readuntil(b':'), timeout=5)
+                await asyncio.wait_for(telnet_reader.readuntil(self.telnet_prompt_end), timeout=5)
             except asyncio.exceptions.TimeoutError:
                 print("The long operation timed out, but we've handled it.")  ## TODO probably bail, allow reconnect later or whatever - maybe send error to bot?
             except (asyncio.LimitOverrunError, asyncio.IncompleteReadError) as e:
@@ -548,7 +536,7 @@ class BpqInterface():
 
             # Wait for pass prompt
             try:
-                await asyncio.wait_for(telnet_reader.readuntil(b':'), timeout=5)
+                await asyncio.wait_for(telnet_reader.readuntil(self.telnet_prompt_end), timeout=5)
             except asyncio.exceptions.TimeoutError:
                 print("The long operation timed out, but we've handled it.")  ## TODO probably bail, allow reconnect later or whatever - maybe send error to bot?
             except (asyncio.LimitOverrunError, asyncio.IncompleteReadError) as e:

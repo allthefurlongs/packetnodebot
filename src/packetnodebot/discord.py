@@ -26,6 +26,7 @@ class DiscordConnector(discord.Client):
         if 'sysop_user_id' in self.conf['discord']:
             self.authed_member = await self.fetch_user(self.conf['discord']['sysop_user_id'])
             print(f"Authorised discord user: {self.authed_member}")
+        await self.bot_out_queue.put("Bot Online")
 
     async def send(self, message, member=None):
         if member is None:
