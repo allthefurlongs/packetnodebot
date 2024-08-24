@@ -3,6 +3,10 @@ import discord
 import packetnodebot.common
 
 
+def discord_maxlen_string_chunks(full_message):
+    return (full_message[0+i:2000+i] for i in range(0, len(full_message), 2000))
+
+
 class DiscordConnector(discord.Client):
     def __init__(self, *args, conf, conf_file, terminated, bot_in_queue, bot_out_queue, **kwargs,):
         super().__init__(*args, **kwargs)
@@ -73,7 +77,12 @@ class DiscordConnector(discord.Client):
                     else:
                         print(f"DiscordConnector: unknown InternalBotCommand {message.command}")
                 elif self.authed_member is not None:
-                    await self.send(message)
+                    # Discord max message length is 2000, or the message is rejected
+                    if (len(message) > 2000):
+                        for message_chunk in discord_maxlen_string_chunks(message):
+                            await self.send(message_chunk)
+                    else:
+                        await self.send(message)
                 else:
                     print(f"Not sending message as no registered user populated yet")
                 self.bot_out_queue.task_done()
