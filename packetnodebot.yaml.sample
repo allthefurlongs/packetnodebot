@@ -1,6 +1,7 @@
 node_callsigns: [N0CALL, N0CALL2]
 fixed_width_font: true
 bpq:
+  monitor_on_startup: false
   monitor_ports: [1, 2]
   mon_filter:
     to: [N0CALL, N0CALL2]

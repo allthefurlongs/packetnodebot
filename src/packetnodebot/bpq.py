@@ -76,6 +76,13 @@ class BpqInterface():
         else:
             self.fixed_width = False
 
+        if 'monitor_on_startup' in self.conf['bpq'] and self.conf['bpq']['monitor_on_startup']:
+            self.start_bot_monitor()
+
+    async def start_bot_monitor(self):
+        await self.fbb_start_monitor()
+        self.fbb_state['bot_monitor'] = True
+
     def set_monitor_ports(self, ports):
         self.monitor_ports = ports
         self.monitor_ports_bin = 0b0
