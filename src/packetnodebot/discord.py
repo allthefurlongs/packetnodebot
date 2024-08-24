@@ -4,7 +4,7 @@ import packetnodebot.common
 
 
 def discord_maxlen_string_chunks(full_message):
-    return (full_message[0+i:2000+i] for i in range(0, len(full_message), 2000))
+    return (full_message[0+i:1900+i] for i in range(0, len(full_message), 1900))
 
 
 class DiscordConnector(discord.Client):
@@ -77,9 +77,12 @@ class DiscordConnector(discord.Client):
                     else:
                         print(f"DiscordConnector: unknown InternalBotCommand {message.command}")
                 elif self.authed_member is not None:
-                    # Discord max message length is 2000, or the message is rejected
-                    if (len(message) > 2000):
+                    # Discord max message length is 2000, or the message is rejected, but in reality it seems to need to
+                    # be slightly less.
+                    print(f"len(message): {len(message)}")
+                    if (len(message) > 1900):
                         for message_chunk in discord_maxlen_string_chunks(message):
+                            print(f"len(message_chunk): {len(message_chunk)}")
                             await self.send(message_chunk)
                     else:
                         await self.send(message)
