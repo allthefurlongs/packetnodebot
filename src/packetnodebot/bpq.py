@@ -17,7 +17,7 @@ class BpqInterface():
                       "fixed <on|off>                       - Turn fixed-width font mode on/off.\n"
                       "telnet                               - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
                       "monitor <on|off>                     - Monitor all configured ports for any packets seen.\n"
-                      "monitorports <add|del> <portnum>     - Add/delete a port number from monitoring.\n"
+                      "monports <add|del> <portnum>         - Add/delete a port number from monitoring.\n"
                       "monfilter <add|del> <from|to> <call> - Add/delete calls to exclude from monitoring.\n"
                       "alert call seen                      - Add an alert when a callsign is seen on any port set for monitoring.\n"
                       "alert call connected                 - Add an alert when a callsign connects to the node.\n"
@@ -28,7 +28,7 @@ class BpqInterface():
                 "fixed <on|off> - Turn fixed-width font mode on/off.\n"
                 "telnet - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
                 "monitor <on|off> - Monitor all configured ports for any packets seen.\n"
-                "monitorports <add|del> <portnum> - Add/delete a port number from monitoring.\n"
+                "monports <add|del> <portnum> - Add/delete a port number from monitoring.\n"
                 "monfilter <add|del> <from|to> <call> - Add/delete calls to exclude from monitoring.\n"
                 "alert call seen - Add an alert when a callsign is seen on any port set for monitoring.\n"
                 "alert call connected - Add an alert when a callsign connects to the node.\n"
@@ -224,8 +224,8 @@ class BpqInterface():
                 elif message == 'telnet':   ### TODO maybe add an option to use an alternative telnet user than the default configured
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
-                elif message.startswith('monitorports'):
-                    monitorports_usage = "Usage: monitorports <add|del> <portnum>"
+                elif message.startswith('monports'):
+                    monports_usage = "Usage: monports <add|del> <portnum>"
                     fields = message.split(' ')
                     if len(fields) == 1:
                         await self.bot_out_queue.put("Monitor set to use ports: "
@@ -253,11 +253,11 @@ class BpqInterface():
                                 await self.bot_out_queue.put("Monitor set to use ports: "
                                                             f"{', '.join(str(port) for port in self.monitor_ports)}")
                             else:
-                                await self.bot_out_queue.put(monitorports_usage)
+                                await self.bot_out_queue.put(monports_usage)
                         except (TypeError, ValueError):
-                            await self.bot_out_queue.put(monitorports_usage)  # Probably a non-number port provided
+                            await self.bot_out_queue.put(monports_usage)  # Probably a non-number port provided
                     else:
-                        await self.bot_out_queue.put(monitorports_usage)
+                        await self.bot_out_queue.put(monports_usage)
                 elif message.startswith('monfilter'):
                     monfilter_usage = "Usage: monfilter <add|del> <from|to> <call>"
                     fields = message.split(' ')
