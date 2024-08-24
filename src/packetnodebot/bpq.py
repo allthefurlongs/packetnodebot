@@ -244,7 +244,7 @@ class BpqInterface():
         monitor_ports = 0b0
         if 'monitor_ports' in self.conf['bpq']:
             for port in self.conf['bpq']['monitor_ports']:
-                monitor_ports |= portnum_bin(1)
+                monitor_ports |= portnum_bin(port)
         self.fbb_writer.write(f"\\\\\\\\{monitor_ports} 1 1 1 0 0 0 1\r".encode('utf-8'))
         await self.fbb_writer.drain()
 
