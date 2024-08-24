@@ -68,6 +68,8 @@ class BpqInterface():
             self.mon_filter['from'] = []
         if 'to' not in self.mon_filter:
             self.mon_filter['to'] = []
+        self.mon_filter['from'] = [s.upper() for s in self.mon_filter['from']]
+        self.mon_filter['to'] = [s.upper() for s in self.mon_filter['to']]
 
         if 'fixed_width_font' in conf and conf['fixed_width_font']:
             self.fixed_width = True
@@ -100,13 +102,25 @@ class BpqInterface():
         to_field = from_to[0]
         from_calls = from_field.split(',')
         for from_call in from_calls:
-            if from_call in self.mon_filter['from']:
+            if from_call.upper() in self.mon_filter['from']:
                 return False
         to_calls = to_field.split(',')
         for to_call in to_calls:
-            if to_call in self.mon_filter['to']:
+            if to_call.upper() in self.mon_filter['to']:
                 return False
         return True
+
+    def fmt_monfilter_from(self):
+        if len(self.mon_filter['from']) > 0:
+            return ', '.join(self.mon_filter['from'])
+        else:
+            return '(none)'
+
+    def fmt_monfilter_to(self):
+        if len(self.mon_filter['to']) > 0:
+            return ', '.join(self.mon_filter['to'])
+        else:
+            return '(none)'
 
     ### TODO persist alerts to the config file
 
@@ -242,25 +256,19 @@ class BpqInterface():
                 elif message.startswith('monfilter'):
                     monfilter_usage = "Usage: monfilter <add|del> <from|to> <call>"
                     fields = message.split(' ')
-                    if len(self.mon_filter['from']) > 0:
-                        from_filter = ', '.join(self.mon_filter['from'])
-                    else:
-                        from_filter = '(none)'
-                    if len(self.mon_filter['to']) > 0:
-                        to_filter = ', '.join(self.mon_filter['to'])
-                    else:
-                        to_filter = '(none)'
                     if len(fields) == 1:
-                        await self.bot_out_queue.put(f"Monitor filtering From calls: {from_filter}, To calls: {to_filter}")
+                        await self.bot_out_queue.put(f"Monitor filtering From calls: {fmt_monfilter_from()}, "
+                                                     f"To calls: {fmt_monfilter_to()}")
                     elif len(fields) == 4 and (fields[1] == 'add' or fields[1] == 'del') and (fields[2] == 'from' or
                                                                                               fields[2] == 'to'):
                         if fields[1] == 'add':
                             if fields[3] not in self.mon_filter[fields[2]]:
-                                self.mon_filter[fields[2]].append(fields[3])
+                                self.mon_filter[fields[2]].append(fields[3].upper())
                         elif fields[1] == 'del':
                             if fields[3] in self.mon_filter[fields[2]]:
-                                self.mon_filter[fields[2]].remove(fields[3])
-                        await self.bot_out_queue.put(f"Monitor filtering From calls: {from_filter}, To calls: {to_filter}")
+                                self.mon_filter[fields[2]].remove(fields[3].upper())
+                        await self.bot_out_queue.put(f"Monitor filtering From calls: {fmt_monfilter_from()}, "
+                                                     f"To calls: {fmt_monfilter_to()}")
                     else:
                         await self.bot_out_queue.put(monfilter_usage)
                 elif message.startswith('monitor'):
