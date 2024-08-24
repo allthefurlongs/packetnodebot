@@ -245,7 +245,7 @@ class BpqInterface():
         if 'monitor_ports' in self.conf['bpq']:
             for port in self.conf['bpq']['monitor_ports']:
                 monitor_ports |= portnum_bin(1)
-        self.fbb_writer.write(f"\\\\\\\\{monitor_ports} 1 1 0 0 0 0 1\r".encode('utf-8'))
+        self.fbb_writer.write(f"\\\\\\\\{monitor_ports} 1 1 1 0 0 0 1\r".encode('utf-8'))
         await self.fbb_writer.drain()
 
     async def ensure_fbb_connected(self):
