@@ -77,7 +77,7 @@ class BpqInterface():
             self.fixed_width = False
 
         if 'monitor_on_startup' in self.conf['bpq'] and self.conf['bpq']['monitor_on_startup']:
-            self.start_bot_monitor()
+            asyncio.create_task(self.start_bot_monitor())
 
     async def start_bot_monitor(self):
         await self.fbb_start_monitor()
