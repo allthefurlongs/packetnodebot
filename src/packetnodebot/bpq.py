@@ -13,19 +13,21 @@ def portnum_bin(port_num):
 
 class BpqInterface():
     COMMANDS_FIXED = ("Commands:\n"
-                      "help                 - This help message.\n"
-                      "fixed <on|off>       - Turn fixed-width font mode on/off.\n"
-                      "telnet passthru      - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
-                      "monitor <on|off>     - Monitor all configured ports for any packets seen\n"
-                      "alert call seen      - Add an alert when a callsign is seen on any port set for monitoring.\n"
-                      "alert call connected - Add an alert when a callsign connects to the node.\n"
-                      "remove alert         - Remove any of the above alerts\n"
-                      "terminate bot        - Shut down the bot, you will no longer be able to interact with it until it is restarted.")
+                      "help                             - This help message.\n"
+                      "fixed <on|off>                   - Turn fixed-width font mode on/off.\n"
+                      "telnet passthru                  - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                      "monitor <on|off>                 - Monitor all configured ports for any packets seen.\n"
+                      "monitorports <add|del> <portnum> - Add/delete a port number from monitoring.\n"
+                      "alert call seen                  - Add an alert when a callsign is seen on any port set for monitoring.\n"
+                      "alert call connected             - Add an alert when a callsign connects to the node.\n"
+                      "remove alert                     - Remove any of the above alerts\n"
+                      "terminate bot                    - Shut down the bot, you will no longer be able to interact with it until it is restarted.")
     COMMANDS = ("Commands:\n"
                 "help - This help message.\n"
                 "fixed <on|off> - Turn fixed-width font mode on/off.\n"
                 "telnet passthru - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
-                "monitor <on|off> - Monitor all configured ports for any packets seen\n"
+                "monitor <on|off> - Monitor all configured ports for any packets seen.\n"
+                "monitorports <add|del> <portnum> - Add/delete a port number from monitoring.\n"
                 "alert call seen - Add an alert when a callsign is seen on any port set for monitoring.\n"
                 "alert call connected - Add an alert when a callsign connects to the node.\n"
                 "remove alert - Remove any of the above alerts\n"
@@ -51,12 +53,21 @@ class BpqInterface():
         self.fbb_connection_task = None
         self.fbb_writer = None
         self.fbb_reader = None
+        if 'monitor_ports' in self.conf['bpq']:
+            self.set_monitor_ports(self.conf['bpq']['monitor_ports'])
+        else:
+            self.set_monitor_ports([])
 
         if 'fixed_width_font' in conf and conf['fixed_width_font']:
             self.fixed_width = True
         else:
             self.fixed_width = False
 
+    def set_monitor_ports(self, ports):
+        self.monitor_ports = ports
+        self.monitor_ports_bin = 0b0
+        for port in self.monitor_ports:
+            self.monitor_ports_bin |= portnum_bin(port)
 
     ### TODO persist alerts to the config file
 
@@ -155,8 +166,34 @@ class BpqInterface():
                 elif message == 'telnet passthru':   ### TODO maybe add an option to use an alternative telnet user than the default configured
                     telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
                     self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
+                elif message.startswith('monitorports'):
+                    monitorports_usage = "Usage: monitorports <add|del> <portnum>"
+                    fields = message.split(' ')
+                    if len(fields) == 2:
+                        try:
+                            if fields[1] == 'add':
+                                port = int(fields[2])
+                                if port not in self.monitor_ports:
+                                    self.monitor_ports.append(port)
+                                    self.set_monitor_ports(self.monitor_ports)
+                                await self.bot_out_queue.put("Monitor set to use ports: "
+                                                     f"{', '.join(str(port) for port in self.monitor_ports)}")
+                            elif fields[1] == 'del':
+                                port = int(fields[2])
+                                if port in self.monitor_ports:
+                                    self.monitor_ports.remove(port)
+                                    self.set_monitor_ports(self.monitor_ports)
+                                await self.bot_out_queue.put("Monitor set to use ports: "
+                                                     f"{', '.join(str(port) for port in self.monitor_ports)}")
+                            else:
+                                await self.bot_out_queue.put(monitorports_usage)
+                        except (TypeError, ValueError):
+                            await self.bot_out_queue.put(monitorports_usage)  # Probably a non-number port provided
+                    else:
+                        await self.bot_out_queue.put("Monitor set to use ports: "
+                                                     f"{', '.join(str(port) for port in self.monitor_ports)}")
                 elif message.startswith('monitor'):
-                    monitor_usage = "Usage: monitor <on|off>"   ### TODO expand this command to allow specifying ports to monitor, and type of monitoring on/off (TX, NODES, etc.)
+                    monitor_usage = "Usage: monitor <on|off>"
                     fields = message.split(' ')
                     if len(fields) == 2:
                         if fields[1] == 'on':
@@ -177,7 +214,7 @@ class BpqInterface():
                             await self.bot_out_queue.put(f"Monitor is on\n{monitor_usage}")
                         else:
                             await self.bot_out_queue.put(f"Monitor is off\n{monitor_usage}")
-                elif message.startswith('alert'):
+                elif message.startswith('alert'):  ## TODO optionally specify only certain ports to look for the call on?
                     usage_alert = "Usage: alert <call> [alert_specific_args]"
                     if message.startswith('alert call'):
                         alert_call_usage = "Usage: alert call <seen|connected> <callsign>"
@@ -241,11 +278,7 @@ class BpqInterface():
     async def fbb_start_monitor(self):
         await self.ensure_fbb_connected()
         self.fbb_state['monitoring'] = True
-        monitor_ports = 0b0
-        if 'monitor_ports' in self.conf['bpq']:
-            for port in self.conf['bpq']['monitor_ports']:
-                monitor_ports |= portnum_bin(port)
-        self.fbb_writer.write(f"\\\\\\\\{monitor_ports} 1 1 1 0 0 0 1\r".encode('utf-8'))
+        self.fbb_writer.write(f"\\\\\\\\{self.monitor_ports_bin} 1 1 1 0 0 0 1\r".encode('utf-8'))
         await self.fbb_writer.drain()
 
     async def ensure_fbb_connected(self):
