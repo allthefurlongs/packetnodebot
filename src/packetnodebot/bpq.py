@@ -257,8 +257,8 @@ class BpqInterface():
                     monfilter_usage = "Usage: monfilter <add|del> <from|to> <call>"
                     fields = message.split(' ')
                     if len(fields) == 1:
-                        await self.bot_out_queue.put(f"Monitor filtering From calls: {fmt_monfilter_from()}, "
-                                                     f"To calls: {fmt_monfilter_to()}")
+                        await self.bot_out_queue.put(f"Monitor filtering From calls: {self.fmt_monfilter_from()}, "
+                                                     f"To calls: {self.fmt_monfilter_to()}")
                     elif len(fields) == 4 and (fields[1] == 'add' or fields[1] == 'del') and (fields[2] == 'from' or
                                                                                               fields[2] == 'to'):
                         if fields[1] == 'add':
@@ -267,8 +267,8 @@ class BpqInterface():
                         elif fields[1] == 'del':
                             if fields[3] in self.mon_filter[fields[2]]:
                                 self.mon_filter[fields[2]].remove(fields[3].upper())
-                        await self.bot_out_queue.put(f"Monitor filtering From calls: {fmt_monfilter_from()}, "
-                                                     f"To calls: {fmt_monfilter_to()}")
+                        await self.bot_out_queue.put(f"Monitor filtering From calls: {self.fmt_monfilter_from()}, "
+                                                     f"To calls: {self.fmt_monfilter_to()}")
                     else:
                         await self.bot_out_queue.put(monfilter_usage)
                 elif message.startswith('monitor'):
