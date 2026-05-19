@@ -1,3 +1,5 @@
+# Required for 'alert call connected' to fire. List the AX.25 callsigns BPQ uses for incoming connects
+# (typically your node's call + SSID variants).
 node_callsigns: [N0CALL, N0CALL2]
 fixed_width_font: true
 bpq:
@@ -7,14 +9,19 @@ bpq:
     to: [N0CALL, N0CALL2]
     from: []
   telnet_host: 127.0.0.1
-  telnet_port: 8010
+  # You can use the real telnet port, or the FBB port here, but if you use the telnet port you will get node level timeouts where despite
+  # being connected to telnet itself, the node disconnects you from the stream. This does not occur if you use the FBB port instead.
+  telnet_port: 8011
   telnet_user: N0CALL
   telnet_pass: p@ssword
-  telnet_custom_prompt_end: ":"
   fbb_host: 127.0.0.1
   fbb_port: 8011
   fbb_user: N0CALL
   fbb_pass: p@ssword
+  fbb_reconnect_initial_delay: 5    # seconds, first delay between FBB reconnect attempts
+  fbb_reconnect_max_delay: 60       # seconds, maximum delay (exponential backoff cap)
+  fbb_read_idle_timeout: 600        # seconds, force FBB reconnect if no bytes received for this long (must be > keepalive interval ~540s)
+  alert_cooldown: 300               # seconds, minimum gap between duplicate alerts for the same (callsign, alert-type); 0 disables
 bot_connector: discord
 discord:
   token: abcd1234

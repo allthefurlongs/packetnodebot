@@ -1,3 +1,5 @@
+import asyncio
+
 import yaml
 import discord
 import packetnodebot.common
@@ -8,18 +10,15 @@ def discord_maxlen_string_chunks(full_message):
 
 
 class DiscordConnector(discord.Client):
-    def __init__(self, *args, conf, conf_file, terminated, bot_in_queue, bot_out_queue, **kwargs,):
+    def __init__(self, *args, conf, conf_file, terminated, bot_in_queue, bot_out_queue, state, **kwargs,):
         super().__init__(*args, **kwargs)
         self.conf = conf
         self.conf_file = conf_file
         self.terminated = terminated
         self.bot_in_queue = bot_in_queue
         self.bot_out_queue = bot_out_queue
+        self.state = state
         self.authed_member = None
-        if 'fixed_width_font' in conf and conf['fixed_width_font']:
-            self.fixed_width = True
-        else:
-            self.fixed_width = False
 
     async def on_ready(self):
         print(f'Connected to discord as {self.user} (ID: {self.user.id})')
@@ -31,7 +30,7 @@ class DiscordConnector(discord.Client):
     async def send(self, message, member=None):
         if member is None:
             member = self.authed_member
-        if self.fixed_width:
+        if self.state.fixed_width:
             await member.send(f"```{message}```")
         else:
             await member.send(message)
@@ -63,18 +62,15 @@ class DiscordConnector(discord.Client):
             print(f"DiscordConnector error in on_message(): {e}")
 
     async def process_bot_outgoing(self):
-        try:
-            while not self.terminated.is_set():
-                message = await self.bot_out_queue.get()
+        while not self.terminated.is_set():
+            try:
+                message = await asyncio.wait_for(self.bot_out_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            try:
                 if type(message) is packetnodebot.common.InternalBotCommand:
                     if message.command == 'terminate':
                         self.terminated.set()
-                    elif message.command == 'fixed':
-                        if message.args == 'on':
-                            self.fixed_width = True
-                        elif message.args == 'off':
-                            self.fixed_width = False
-                        print(f"self.fixed_width set to: {self.fixed_width}")
                     else:
                         print(f"DiscordConnector: unknown InternalBotCommand {message.command}")
                 elif self.authed_member is not None:
@@ -87,7 +83,8 @@ class DiscordConnector(discord.Client):
                         await self.send(message)
                 else:
                     print(f"Not sending message as no registered user populated yet")
+            except Exception as e:
+                print(f"DiscordConnector error in process_bot_outgoing(): {e}")
+            finally:
                 self.bot_out_queue.task_done()
-            await self.close()
-        except Exception as e:
-            print(f"DiscordConnector error in process_bot_outgoing(): {e}")
+        await self.close()

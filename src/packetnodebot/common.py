@@ -1,5 +1,3 @@
-from io import StringIO
-
 # Represents a bot connector command that originated not from the remote user, but from inside packetnodebot internals
 class InternalBotCommand:
     def __init__(self, command, args=None):
@@ -7,14 +5,12 @@ class InternalBotCommand:
         self.args = args
 
 
+# Shared mutable state between BpqInterface and the bot connector. Both sides hold a reference to the same instance,
+# so a mutation on one side is observed live by the other (no message round-trip needed).
+class BotState:
+    def __init__(self, fixed_width=False):
+        self.fixed_width = fixed_width
+
+
 def bytes_str(b):
-        string = StringIO()
-        for byte in b:
-            decoded = bytes([byte]).decode('utf-8', 'ignore')
-            if byte == 13:  # Convert \r to \n as it works better for bot messages anyway
-                string.write('\n')
-            elif len(decoded) == 0:
-                string.write('\\x{:02X}'.format(byte))
-            else:
-                string.write(decoded)
-        return string.getvalue()
+    return b.decode('utf-8', errors='backslashreplace').replace('\r', '\n')
