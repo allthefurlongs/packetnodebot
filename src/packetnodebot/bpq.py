@@ -86,6 +86,7 @@ class BpqInterface():
                       "help                                 - This help message.\n"
                       "fixed <on|off>                       - Turn fixed-width font mode on/off.\n"
                       "telnet                               - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                      "hash_cmds_telnet <on|off>            - When on, while in a telnet session prefix any bot command with # (e.g. #fixed off) to run it instead of sending it to telnet.\n"
                       "monitor <on|off>                     - Monitor all configured ports for any packets seen.\n"
                       "monports <add|del> <portnum>         - Add/delete a port number from monitoring.\n"
                       "monfilter <add|del> <from|to> <call> - Add/delete calls to exclude from monitoring.\n"
@@ -98,6 +99,7 @@ class BpqInterface():
                 "help - This help message.\n"
                 "fixed <on|off> - Turn fixed-width font mode on/off.\n"
                 "telnet - Connect to telnet, all messages recieved will be sent directly to telnet. Use #quit to end the telnet session.\n"
+                "hash_cmds_telnet <on|off> - When on, while in a telnet session prefix any bot command with # (e.g. #fixed off) to run it instead of sending it to telnet.\n"
                 "monitor <on|off> - Monitor all configured ports for any packets seen.\n"
                 "monports <add|del> <portnum> - Add/delete a port number from monitoring.\n"
                 "monfilter <add|del> <from|to> <call> - Add/delete calls to exclude from monitoring.\n"
@@ -144,6 +146,7 @@ class BpqInterface():
 
         self.node_callsigns = {c.upper() for c in self.conf.get('node_callsigns', [])}
         self.alert_cooldown = max(0, int(self.conf['bpq'].get('alert_cooldown', 300)))
+        self.hash_cmds_telnet = bool(self.conf['bpq'].get('hash_cmds_telnet', False))
         self._alert_last_fired = {}  # {(alert_type, callsign): monotonic_seconds}
 
         if 'monitor_ports' in self.conf['bpq']:
@@ -323,9 +326,9 @@ class BpqInterface():
         return {
             'help': self._cmd_help,
             '?': self._cmd_help,
-            '#help': self._cmd_help,
             'fixed': self._cmd_fixed,
             'telnet': self._cmd_telnet,
+            'hash_cmds_telnet': self._cmd_hash_cmds_telnet,
             'monports': self._cmd_monports,
             'monfilter': self._cmd_monfilter,
             'monitor': self._cmd_monitor,
@@ -395,8 +398,25 @@ class BpqInterface():
         if fields:
             await self.bot_out_queue.put("Unknown command: type help for help")
             return
+        # telnet_in_queue is only set once telnet_passthru() has connected and authed, so also guard on the
+        # task itself so a quick re-issue during connect doesn't start a second session.
+        if self.telnet_in_queue is not None or (
+                self.telnet_passthru_task is not None and not self.telnet_passthru_task.done()):
+            await self.bot_out_queue.put("Already connected to telnet")
+            return
         telnet_in_queue = asyncio.Queue()  # Will be set to self.telnet_in_queue once logged in to telnet
         self.telnet_passthru_task = asyncio.create_task(self.telnet_passthru(telnet_in_queue))
+
+    async def _cmd_hash_cmds_telnet(self, fields):
+        usage = "Usage: hash_cmds_telnet <on|off>"
+        if len(fields) == 1 and fields[0] in ("on", "off"):
+            self.hash_cmds_telnet = (fields[0] == "on")
+            if self.hash_cmds_telnet:
+                await self.bot_out_queue.put("Hash-prefixed bot commands in telnet enabled")
+            else:
+                await self.bot_out_queue.put("Hash-prefixed bot commands in telnet disabled")
+        else:
+            await self.bot_out_queue.put(usage)
 
     async def _cmd_monports(self, fields):
         usage = "Usage: monports <add|del> <portnum>"
@@ -529,15 +549,38 @@ class BpqInterface():
         if fields:
             await self.bot_out_queue.put("Unknown command: type help for help")
             return
-        await self.bot_out_queue.put("Terminate Bot - Are you sure? You will not be able to interact with "
-                                     "the bot until you restart it on the node. Reply 'yes' to confirm.")
-        self.command_state = 'terminate_bot_confirm'
-    
-    async def handle_message_tenet_passthru(self, message):
-        if message == '#quit':
-            self.telnet_passthru_task.cancel()
+        if self.telnet_in_queue is not None:
+            await self.bot_out_queue.put("Terminate Bot - Are you sure? You will not be able to interact with "
+                                         "the bot until you restart it on the node. Reply '#yes' to confirm, "
+                                         "or '#no' to abort.")
         else:
-            await self.telnet_in_queue.put(message)
+            await self.bot_out_queue.put("Terminate Bot - Are you sure? You will not be able to interact with "
+                                         "the bot until you restart it on the node. Reply 'yes' to confirm.")
+        self.command_state = 'terminate_bot_confirm'
+
+    async def handle_message_tenet_passthru(self, message):
+        # Once we've detected a '#' prefix, treat it as bot input and lowercase for comparison/dispatch
+        # (matches the convention used by process_bot_incoming for non-telnet input). Plain telnet input
+        # keeps its original case so case-sensitive payloads (e.g. BBS message text) pass through clean.
+        if message.startswith('#'):
+            lowered = message.lower()
+            if self.command_state == 'terminate_bot_confirm':
+                # Mirror non-telnet confirmation semantics within the '#' space: '#yes' confirms, any
+                # other '#'-prefixed reply aborts and is consumed. Non-'#' telnet input falls through.
+                if lowered == '#yes':
+                    await self.bot_out_queue.put("Bot Terminating - bye!")
+                    self.terminated.set()
+                    return
+                self.command_state = None
+                await self.bot_out_queue.put("Bot Terminate aborted")
+                return
+            if lowered == '#quit':
+                self.telnet_passthru_task.cancel()
+                return
+            if self.hash_cmds_telnet and len(lowered) > 1:
+                await self._dispatch_command(lowered[1:].split())
+                return
+        await self.telnet_in_queue.put(message)
 
     async def keepalive_nulls(self, writer, interval_secs=540):
         while not self.terminated.is_set():

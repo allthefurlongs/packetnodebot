@@ -139,6 +139,7 @@ All commands are sent as Discord DMs from the registered sysop user. Commands ar
 | `help` (also `?`, `#help`) | Show the command list. |
 | `fixed <on\|off>` | Wrap bot output in a Discord code block for monospaced rendering. |
 | `telnet` | Open a raw telnet passthru into the node. `#quit` exits. |
+| `hash_cmds_telnet <on\|off>` | When on, while in a telnet session prefix any bot command with `#` (e.g. `#fixed off`) to run it instead of sending it to telnet. |
 | `monitor <on\|off>` | Stream live packets from monitored ports into the chat. |
 | `monports [add\|del <portnum>]` | Show / change which BPQ port numbers are monitored. |
 | `monfilter [add\|del <from\|to> <call>]` | Show / change call filters that exclude traffic from the monitor stream. |
@@ -162,7 +163,12 @@ This setting can also be set at startup via the `fixed_width_font` config option
 #### `telnet`
 Opens a raw passthru telnet session to the node. After the bot reports `Entering telnet passthru mode`, every message you send is forwarded as a line to the node, and every line the node sends is DMed back. Send `#quit` to close the session and return to normal bot command mode.
 
-While in passthru mode, no bot commands are interpreted — only the literal `#quit` is intercepted locally.
+While in passthru mode, no bot commands are interpreted by default — only the literal `#quit` is intercepted locally. To also intercept other commands prefixed with `#`, enable `hash_cmds_telnet`. Issuing `telnet` (or `#telnet` with `hash_cmds_telnet` on) while a session is already active just replies `Already connected to telnet`.
+
+#### `hash_cmds_telnet <on|off>`
+When `on`, while inside a `telnet` passthru session you can run any bot command by prefixing it with `#` (e.g. `#fixed off`, `#monitor on`, `#monports add 1`) — the `#`-prefixed line is intercepted and dispatched as a bot command instead of being sent to telnet. When `off` (the default), everything except `#quit` is forwarded raw.
+
+This setting can also be set at startup via the `bpq.hash_cmds_telnet` config option.
 
 #### `monitor <on|off>`
 Turns the live monitor feed on or off. When on, the bot subscribes to BPQ's monitor stream (over the FBB connection) for the configured port set and forwards each frame as a DM, prefixed with `Monitor:`.
@@ -208,6 +214,8 @@ Removes a previously added alert. If no other alerts and no `monitor` are active
 #### `terminate bot`
 Asks for `yes` confirmation, then shuts the bot down cleanly. You'll need shell access to the host to restart it.
 
+If invoked from inside a `telnet` passthru session (as `#terminate bot`, with `hash_cmds_telnet` on), reply with `#yes` to confirm or `#no` to abort, so the confirmation can be sent without leaving the telnet session.
+
 ## Configuration
 
 ### Session settings (set via chat)
@@ -217,6 +225,7 @@ These are runtime-only — they are **not** persisted to the YAML file and reset
 | Setting | Chat command | Config key |
 | --- | --- | --- |
 | Fixed-width output | `fixed on` / `fixed off` | `fixed_width_font` |
+| Hash-prefixed cmds in telnet | `hash_cmds_telnet on` / `hash_cmds_telnet off` | `bpq.hash_cmds_telnet` |
 | Monitor on/off | `monitor on` / `monitor off` | `bpq.monitor_on_startup` |
 | Monitored port list | `monports add\|del <n>` | `bpq.monitor_ports` |
 | Monitor from/to filters | `monfilter add\|del from\|to <call>` | `bpq.mon_filter.from` / `bpq.mon_filter.to` |
@@ -258,6 +267,7 @@ The active config lives at `packetnodebot.yaml` in the working directory the bot
 | `fbb_reconnect_max_delay` | no | `60` | Cap on the exponential backoff between FBB reconnect attempts, in seconds. |
 | `fbb_read_idle_timeout` | no | `600` | If no bytes are received on the FBB socket for this many seconds, treat the connection as dead and reconnect. Must be greater than the internal keepalive interval (~540s). |
 | `alert_cooldown` | no | `300` | Default minimum seconds between duplicate alerts for the same `(call, alert-type)` pair. `0` disables. Overridable at runtime via `alert cooldown`. |
+| `hash_cmds_telnet` | no | `false` | If true, while in a `telnet` passthru session bot commands prefixed with `#` (e.g. `#fixed off`) run as bot commands instead of being sent to telnet. Overridable at runtime via `hash_cmds_telnet`. |
 
 #### `discord:` block
 
