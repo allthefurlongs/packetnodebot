@@ -1,5 +1,4 @@
 import asyncio
-import re
 
 import yaml
 import discord
@@ -28,19 +27,24 @@ class DiscordConnector(discord.Client):
             print(f"Authorised discord user: {self.authed_member}")
         await self.bot_out_queue.put("Bot Online")
 
-    def _fence_for(self, message):
-        # Prevent message content containing ``` from injecting into our fixed-width markdown and breaking the
-        # formatting: pick a fence longer than any backtick run in the payload so embedded ``` can't close the block
-        # early.
-        longest_run = max((len(m) for m in re.findall(r'`+', message)), default=0)
-        return '`' * max(3, longest_run + 1)
+    def _escape_fixed_width(self, message):
+        # Prevent message content containing ``` from breaking out of our fixed-width markdown by injecting a
+        # zero-width space into any run of 3+ backticks so the discord parser never sees three in a row inside the
+        # payload. ZWSP is invisible to the reader; it does come along on copy-paste.
+        while '```' in message:
+            message = message.replace('```', '``\u200b`')
+        return message
+
+    def _wrap_fixed_width(self, content):
+        # ZWSP padding inside the fence stops 1-2 backticks at the content edges from concatenating with the closing
+        # ``` and leaking out of the code block.
+        return f"```\u200b{content}\u200b```"
 
     async def send(self, message, member=None):
         if member is None:
             member = self.authed_member
         if self.state.fixed_width:
-            fence = self._fence_for(message)
-            await member.send(f"{fence}{message}{fence}")
+            await member.send(self._wrap_fixed_width(self._escape_fixed_width(message)))
         else:
             await member.send(message)
 
@@ -83,14 +87,14 @@ class DiscordConnector(discord.Client):
                     else:
                         print(f"DiscordConnector: unknown InternalBotCommand {message.command}")
                 elif self.authed_member is not None:
-                    # Discord max message length is 2000, or the message is rejected, but in reality it seems to need to
-                    # be slightly less. When fixed_width is on, size the fence to the whole message before chunking so
-                    # every chunk uses the same fence and no chunk's backtick runs can close the block early.
+                    # Discord max message length is 2000, or the message is rejected, but in reality it seems to need
+                    # to be slightly less. When fixed_width is on, escape the whole payload first and reserve room in
+                    # each chunk for the fence + ZWSP padding (4 chars per side).
                     if self.state.fixed_width:
-                        fence = self._fence_for(message)
-                        chunk_size = 1900 - 2 * len(fence)
-                        for i in range(0, len(message), chunk_size):
-                            await self.authed_member.send(f"{fence}{message[i:i+chunk_size]}{fence}")
+                        escaped = self._escape_fixed_width(message)
+                        chunk_size = 1900 - 8
+                        for i in range(0, len(escaped), chunk_size):
+                            await self.authed_member.send(self._wrap_fixed_width(escaped[i:i+chunk_size]))
                     elif len(message) > 1900:
                         for message_chunk in discord_maxlen_string_chunks(message):
                             await self.authed_member.send(message_chunk)
