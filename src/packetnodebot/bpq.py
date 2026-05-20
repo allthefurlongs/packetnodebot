@@ -146,7 +146,7 @@ class BpqInterface():
 
         self.node_callsigns = {c.upper() for c in self.conf.get('node_callsigns', [])}
         self.alert_cooldown = max(0, int(self.conf['bpq'].get('alert_cooldown', 300)))
-        self.hash_cmds_telnet = bool(self.conf['bpq'].get('hash_cmds_telnet', False))
+        self.hash_cmds_telnet = bool(self.conf['bpq'].get('hash_cmds_telnet', True))
         self._alert_last_fired = {}  # {(alert_type, callsign): monotonic_seconds}
 
         if 'monitor_ports' in self.conf['bpq']:

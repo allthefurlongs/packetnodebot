@@ -22,7 +22,7 @@ bpq:
   fbb_reconnect_max_delay: 60       # seconds, maximum delay (exponential backoff cap)
   fbb_read_idle_timeout: 600        # seconds, force FBB reconnect if no bytes received for this long (must be > keepalive interval ~540s)
   alert_cooldown: 300               # seconds, minimum gap between duplicate alerts for the same (callsign, alert-type); 0 disables
-  hash_cmds_telnet: false           # when true, while in a telnet passthru session bot commands prefixed with '#' (e.g. '#fixed off') run as bot commands instead of being sent to telnet
+  hash_cmds_telnet: true            # when true, while in a telnet passthru session bot commands prefixed with '#' (e.g. '#fixed off') run as bot commands instead of being sent to telnet
 bot_connector: discord
 discord:
   token: abcd1234
