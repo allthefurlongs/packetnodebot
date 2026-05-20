@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 import yaml
 import discord
@@ -27,11 +28,19 @@ class DiscordConnector(discord.Client):
             print(f"Authorised discord user: {self.authed_member}")
         await self.bot_out_queue.put("Bot Online")
 
+    def _fence_for(self, message):
+        # Prevent message content containing ``` from injecting into our fixed-width markdown and breaking the
+        # formatting: pick a fence longer than any backtick run in the payload so embedded ``` can't close the block
+        # early.
+        longest_run = max((len(m) for m in re.findall(r'`+', message)), default=0)
+        return '`' * max(3, longest_run + 1)
+
     async def send(self, message, member=None):
         if member is None:
             member = self.authed_member
         if self.state.fixed_width:
-            await member.send(f"```{message}```")
+            fence = self._fence_for(message)
+            await member.send(f"{fence}{message}{fence}")
         else:
             await member.send(message)
 
@@ -75,12 +84,18 @@ class DiscordConnector(discord.Client):
                         print(f"DiscordConnector: unknown InternalBotCommand {message.command}")
                 elif self.authed_member is not None:
                     # Discord max message length is 2000, or the message is rejected, but in reality it seems to need to
-                    # be slightly less.
-                    if (len(message) > 1900):
+                    # be slightly less. When fixed_width is on, size the fence to the whole message before chunking so
+                    # every chunk uses the same fence and no chunk's backtick runs can close the block early.
+                    if self.state.fixed_width:
+                        fence = self._fence_for(message)
+                        chunk_size = 1900 - 2 * len(fence)
+                        for i in range(0, len(message), chunk_size):
+                            await self.authed_member.send(f"{fence}{message[i:i+chunk_size]}{fence}")
+                    elif len(message) > 1900:
                         for message_chunk in discord_maxlen_string_chunks(message):
-                            await self.send(message_chunk)
+                            await self.authed_member.send(message_chunk)
                     else:
-                        await self.send(message)
+                        await self.authed_member.send(message)
                 else:
                     print(f"Not sending message as no registered user populated yet")
             except Exception as e:
