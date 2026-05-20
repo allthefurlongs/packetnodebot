@@ -391,6 +391,9 @@ class BpqInterface():
             else:
                 self.state.fixed_width = False
                 await self.bot_out_queue.put("Fixed-width font disabled")
+        elif len(fields) == 0:
+            status = "Fixed is on" if self.state.fixed_width else "Fixed is off"
+            await self.bot_out_queue.put(f"{status}\n{usage}")
         else:
             await self.bot_out_queue.put(usage)
 
@@ -415,6 +418,9 @@ class BpqInterface():
                 await self.bot_out_queue.put("Hash-prefixed bot commands in telnet enabled")
             else:
                 await self.bot_out_queue.put("Hash-prefixed bot commands in telnet disabled")
+        elif len(fields) == 0:
+            status = "hash_cmds_telnet is on" if self.hash_cmds_telnet else "hash_cmds_telnet is off"
+            await self.bot_out_queue.put(f"{status}\n{usage}")
         else:
             await self.bot_out_queue.put(usage)
 
