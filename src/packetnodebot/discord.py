@@ -36,9 +36,12 @@ class DiscordConnector(discord.Client):
         return message
 
     def _wrap_fixed_width(self, content):
-        # ZWSP padding inside the fence stops 1-2 backticks at the content edges from concatenating with the closing
-        # ``` and leaking out of the code block.
-        return f"```\u200b{content}\u200b```"
+        # Only insert ZWSP padding on a side where the content actually has a backtick adjacent to the fence - that's
+        # the only case where 1-2 trailing backticks could concatenate with the closing ``` and leak out of the block.
+        # Unconditional padding renders as a visible blank line in discord.
+        lead = '\u200b' if content.startswith('`') else ''
+        trail = '\u200b' if content.endswith('`') else ''
+        return f"```{lead}{content}{trail}```"
 
     async def send(self, message, member=None):
         if member is None:
